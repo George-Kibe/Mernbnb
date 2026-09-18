@@ -3,9 +3,9 @@ import Footer from '../components/Footer'
 import Header from '../components/Header'
 import toast, {Toaster} from "react-hot-toast"
 import {differenceInCalendarDays} from 'date-fns'
-import { useParams } from 'react-router-dom'
+import { useParams } from 'react-router'
 import axios from 'axios'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { UserContext } from '../UserContext'
 
 const PlacePage = () => {
@@ -181,7 +181,7 @@ const PlacePage = () => {
                    
                 </div>
                 <div className='p-4'>
-                  <div className="bg-white shadow p-4 rounded-2xl">
+                  <div className="bg-white shadow-sm p-4 rounded-2xl">
                     <div className="text-2xl text-center">
                       Price: Kshs. {place.price}
                     </div>

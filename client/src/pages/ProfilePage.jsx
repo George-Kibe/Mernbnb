@@ -1,5 +1,5 @@
-import React, { useContext } from 'react'
-import { useNavigate, Link, useParams, Navigate } from 'react-router-dom'
+import React, { useContext, useState } from 'react'
+import { Link, useParams, Navigate } from 'react-router'
 import toast, {Toaster} from "react-hot-toast"
 import Footer from '../components/Footer'
 import Header from '../components/Header'
@@ -10,7 +10,8 @@ import BookingPage from './BookingPage'
 
 const ProfilePage = () => {
   const {user, ready, setUser} = useContext(UserContext);
-  const navigate = useNavigate()
+  // See LoginPage: redirect declaratively so the "not logged in" branch doesn't win.
+  const [loggedOut, setLoggedOut] = useState(false)
   let {subpage} =useParams();
   const {actionOrId} =useParams();
   if (subpage === undefined) {
@@ -31,8 +32,12 @@ const ProfilePage = () => {
   const logoutUser = () => {
     setUser(null)
     localStorage.clear()
-    navigate('/') 
+    setLoggedOut(true)
     toast.success("Logged out successfully")
+  }
+
+  if (loggedOut) {
+    return <Navigate to={"/"} />
   }
 
   if(!ready){

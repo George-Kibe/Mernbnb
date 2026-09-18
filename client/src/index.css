@@ -1,17 +1,50 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
-input[type="text"], input[type="password"], input[type="email"], 
-input[type="time"], input[type="number"], textarea {
-    @apply w-full border my-1 py-2 px-3 rounded-2xl
+@theme {
+  --color-primary: #f53850;
 }
 
-button{
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+
+  /* Tailwind v4 preflight no longer sets a pointer cursor on buttons. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/*
+  Element defaults live in layers so utility classes (bg-primary, bg-white, ...)
+  still override them. Unlayered CSS beats every layer in Tailwind v4.
+*/
+@layer base {
+  input[type="text"], input[type="password"], input[type="email"],
+  input[type="time"], input[type="number"], textarea {
+    @apply w-full border my-1 py-2 px-3 rounded-2xl;
+  }
+
+  button {
     @apply bg-gray-300;
+  }
 }
 
-button.primary{
-    background-color: #F53850;
-    @apply bg-primary p-2 w-full text-white rounded-full
+@layer components {
+  button.primary {
+    @apply bg-primary p-2 w-full text-white rounded-full;
+  }
 }

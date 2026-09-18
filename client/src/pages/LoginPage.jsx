@@ -1,10 +1,10 @@
 import React, { useContext, useState } from 'react'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import axios from 'axios'
 import toast, {Toaster} from "react-hot-toast"
-import { useNavigate, Navigate } from 'react-router-dom'
+import { Navigate } from 'react-router'
 import { UserContext } from '../UserContext'
 
 const LoginPage = () => {
@@ -12,7 +12,9 @@ const LoginPage = () => {
   console.log(user)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const navigate = useNavigate()
+  // Redirect declaratively: setUser() renders before a transition-wrapped
+  // navigate() commits, which would trip the "already logged in" branch.
+  const [loggedIn, setLoggedIn] = useState(false)
 
   const handleLogin = async(e) => {
     e.preventDefault();
@@ -25,10 +27,13 @@ const LoginPage = () => {
       toast.success("Login successful")
       //console.log(token)
       localStorage.setItem("token", token)
-      navigate("/")
+      setLoggedIn(true)
     } catch (error) {
       toast.error("Login Failed. Try Again");
     }
+  }
+  if (loggedIn){
+    return <Navigate to={"/"} />
   }
   if(!ready){
     return "Loading..."

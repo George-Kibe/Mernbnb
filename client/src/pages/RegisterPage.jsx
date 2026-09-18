@@ -2,7 +2,7 @@ import React, {useState} from 'react'
 import toast, {Toaster} from "react-hot-toast"
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import axios from "axios"
 
 const RegisterPage = () => {

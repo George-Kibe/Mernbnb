@@ -2,7 +2,7 @@ import axios from 'axios';
 import { differenceInCalendarDays, format } from 'date-fns';
 import React, { useEffect, useState } from 'react'
 import ImageComponent from '../components/ImageComponent';
-import { useNavigate} from 'react-router-dom';
+import { useNavigate} from 'react-router';
 
 const BookingsPage = ({ownerId, toast}) => {
   const [bookings, setBookings] = useState([]);
