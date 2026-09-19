@@ -45,7 +45,7 @@ const RegisterPage = () => {
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder='password' />
               <button className='primary'>Register</button>
               <div className="text-center py-2 text-gray-500">
-                Already a member? <Link className='text-black' to={"/login"}>Sign In</Link>
+                Already a member? <Link className='font-semibold text-gray-900 underline' to={"/login"}>Sign In</Link>
               </div>
             </form>
           </div>

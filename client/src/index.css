@@ -1,7 +1,71 @@
 @import 'tailwindcss';
 
+/* `dark:` follows the .dark class on <html> (set by lib/theme.js), not the OS. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --color-primary: #f53850;
+  /* Brand: corporate blue, matching the logo/favicon (#0063DA). Change it
+     here; everything uses these tokens. */
+  --color-primary: #0063da;
+  --color-primary-hover: #0052b4;
+  /* Text/icons on primary backgrounds. Stays white in both themes. */
+  --color-on-primary: #ffffff;
+}
+
+/*
+  Dark theme. Instead of a `dark:` variant on every class, the neutral palette
+  is flipped: white becomes the darkest surface and gray-50…950 swap ends, so
+  bg-white / text-gray-900 / border-gray-200 etc. adapt automatically.
+  - Use `text-on-primary` (not text-white) on bg-primary.
+  - `black` is not flipped (overlays like bg-black/50 stay dark).
+  - Wrap controls drawn on top of photos in `.keep-light` to keep them light.
+  - Popovers need `dark:bg-gray-50` (a raised surface) so they don't blend in.
+*/
+@layer base {
+  .dark {
+    color-scheme: dark;
+    --color-white: oklch(13% 0.028 261.692);
+    --color-gray-50: oklch(21% 0.034 264.665);
+    --color-gray-100: oklch(27.8% 0.033 256.848);
+    --color-gray-200: oklch(37.3% 0.034 259.733);
+    --color-gray-300: oklch(44.6% 0.03 256.802);
+    --color-gray-400: oklch(55.1% 0.027 264.364);
+    --color-gray-500: oklch(70.7% 0.022 261.325);
+    --color-gray-600: oklch(87.2% 0.01 258.338);
+    --color-gray-700: oklch(92.8% 0.006 264.531);
+    --color-gray-800: oklch(96.7% 0.003 264.542);
+    --color-gray-900: oklch(98.5% 0.002 247.839);
+    --color-gray-950: #ffffff;
+  }
+
+  /* Tailwind's original light values, for controls on photos. */
+  .dark .keep-light {
+    color-scheme: light;
+    --color-white: #ffffff;
+    --color-gray-50: oklch(98.5% 0.002 247.839);
+    --color-gray-100: oklch(96.7% 0.003 264.542);
+    --color-gray-200: oklch(92.8% 0.006 264.531);
+    --color-gray-300: oklch(87.2% 0.01 258.338);
+    --color-gray-400: oklch(70.7% 0.022 261.325);
+    --color-gray-500: oklch(55.1% 0.027 264.364);
+    --color-gray-600: oklch(44.6% 0.03 256.802);
+    --color-gray-700: oklch(37.3% 0.034 259.733);
+    --color-gray-800: oklch(27.8% 0.033 256.848);
+    --color-gray-900: oklch(21% 0.034 264.665);
+    --color-gray-950: oklch(13% 0.028 261.692);
+  }
+
+  html {
+    background-color: var(--color-white);
+  }
+  body {
+    background-color: var(--color-white);
+    color: var(--color-gray-900);
+  }
+  /* Checkboxes, radios and range inputs in the brand color. */
+  input, progress {
+    accent-color: var(--color-primary);
+  }
 }
 
 /*
@@ -45,6 +109,14 @@
 
 @layer components {
   button.primary {
-    @apply bg-primary p-2 w-full text-white rounded-full;
+    @apply bg-primary p-2 w-full text-on-primary rounded-full transition-colors hover:bg-primary-hover;
+  }
+}
+
+/* Hides the scrollbar on swipeable photo strips. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
   }
 }

@@ -71,7 +71,7 @@ const BookingsPage = ({ownerId, toast}) => {
                 </svg>
                 Kshs. {booking.price}
               </div>
-              <button onClick={(e) => goToPlace(e, booking.place._id)} className="bg-primary px-4 text-white m-2 py-1 rounded-full">
+              <button onClick={(e) => goToPlace(e, booking.place._id)} className="bg-primary hover:bg-primary-hover px-4 text-on-primary m-2 py-1 rounded-full">
                 View Place Details
               </button>
             </div>

@@ -55,7 +55,7 @@ const LoginPage = () => {
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder='password' />
               <button className='primary'>Login</button>
               <div className="text-center py-2 text-gray-500">
-                Don't have an account yet? <Link className='text-black' to={"/register"}>Register Now</Link>
+                Don't have an account yet? <Link className='font-semibold text-gray-900 underline' to={"/register"}>Register Now</Link>
               </div>
             </form>
           </div>

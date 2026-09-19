@@ -22,7 +22,7 @@ const ProfilePage = () => {
   const linkClasses = (type=null) => {
     let classes = "inline-flex gap-4 py-2 px-6 rounded-full mb-4"
     if (type === subpage) {
-        classes += " bg-primary text-white"
+        classes += " bg-primary text-on-primary"
     } else {
       classes += " bg-gray-200"
     }
