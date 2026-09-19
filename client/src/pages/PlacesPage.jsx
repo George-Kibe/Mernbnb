@@ -100,7 +100,8 @@ const PlacesPage = ({toast, ownerId}) => {
         }
         {
           actionOrId && (
-            <div>
+            // Airbnb-style editor: one readable column, not the full window.
+            <div className="mx-auto w-full max-w-3xl">
               <form action="">
                 <h2 className="text-2xl mt-4">Title</h2>
                 <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder='title eg: My Lovely Apartment' />

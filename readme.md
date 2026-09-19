@@ -169,6 +169,23 @@ All models have `createdAt` / `updatedAt` timestamps.
 - `VITE_API_BASE_URL` can be left unset: the client calls `/api` on its own domain, which works on every Vercel alias and preview URL
 - Node.js version **22.x or newer**
 
+## Troubleshooting
+
+### Photos upload but show as broken or "Not visible to guests"
+
+S3 is accepting uploads but refusing to serve them. Open any photo URL in a browser and read the XML error:
+
+- **`AccessDenied … explicit deny … AWSCompromisedKeyQuarantineV2`**: AWS detected your access key in public (for example, committed to a public GitHub repo) and quarantined the IAM user. Treat the key as stolen:
+  1. IAM → Users → the S3 user → **Security credentials**: deactivate and **delete** every access key that was ever committed, then create a new one.
+  2. Put the new key in `api/.env` and in Vercel (`S3_ACCESS_KEY`, `S3_SECRET_ACCESS_KEY`), then redeploy.
+  3. Check CloudTrail and the bucket for activity you don't recognise. The old key could still upload.
+  4. Detach the `AWSCompromisedKeyQuarantineV2` policy from the user once the exposed key is gone.
+  5. Make sure the user's policy allows `s3:PutObject` **and** `s3:GetObject` on `arn:aws:s3:::<bucket>/*`.
+- **`AccessDenied` without that policy**: the IAM user lacks `s3:GetObject`. Add it as in step 5.
+- **`PermanentRedirect`**: `S3_REGION` doesn't match the bucket's region.
+
+Uploads failing outright with *"Photo uploads aren't set up on this server yet"* means the API has no S3 credentials. Set them in `api/.env`.
+
 ## Roadmap
 
 The dependencies are current (September 2026: Express 5.2.1, React 19.3, Vite 8, Tailwind 4, Mongoose 9). The main areas still to improve:
@@ -177,8 +194,6 @@ The dependencies are current (September 2026: Express 5.2.1, React 19.3, Vite 8,
 2. **Reliability.** Fix schema validation typos. Clean up orphaned S3 photos with a lifecycle rule.
 3. **Frontend quality.** A shared layout instead of a per-page Header/Footer/Toaster. Fix the effect dependencies. Loading and error states. Search and filtering.
 4. **Tooling.** ESLint, automated tests (API and UI), and CI.
-
-The detailed, prioritized list lives in [CLAUDE.md](CLAUDE.md).
 
 ## License
 

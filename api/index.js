@@ -16,6 +16,11 @@ const {
 } = require("./lib/s3")
 const { fetchImage, FetchImageError } = require("./lib/fetchImage")
 
+// S3 access keys missing (e.g. a local api/.env without S3_*): say so plainly
+// instead of a generic "try again".
+const NO_S3_CREDENTIALS = "Photo uploads aren't set up on this server yet (missing S3 credentials).";
+const isMissingCredentials = (error) => error?.name === "CredentialsProviderError";
+
 const app = express();
 const bcryptSalt = bcrypt.genSaltSync(10);
 
@@ -120,6 +125,10 @@ app.post("/api/uploads/presign", requireAuth, async(req, res) => {
             return;
         }
         console.error("Presigning uploads failed:", error);
+        if (isMissingCredentials(error)) {
+            res.status(503).json(NO_S3_CREDENTIALS);
+            return;
+        }
         res.status(500).json("Could not prepare the upload. Try again.");
     }
 })
@@ -138,6 +147,10 @@ app.post("/api/uploads/by-link", requireAuth, async(req, res) => {
             return;
         }
         console.error("Uploading by link failed:", error);
+        if (isMissingCredentials(error)) {
+            res.status(503).json(NO_S3_CREDENTIALS);
+            return;
+        }
         res.status(500).json("Could not save that image. Try again.");
     }
 })
