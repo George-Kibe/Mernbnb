@@ -9,9 +9,9 @@ require("dotenv").config({ quiet: true });
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const User = require("../models/User");
-const Place = require("../models/Place");
-const Booking = require("../models/Booking");
+const User = require("../_src/models/User");
+const Place = require("../_src/models/Place");
+const Booking = require("../_src/models/Booking");
 
 const DEMO_HOST = { name: "AirBuenas Demo Host", email: "demo-host@airbuenas.test" };
 

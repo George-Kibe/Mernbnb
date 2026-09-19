@@ -180,7 +180,7 @@ const SearchBar = () => {
                 <span className={`block truncate text-sm ${draft.checkIn ? 'font-semibold' : 'text-gray-500'}`}>{dateText(draft.checkIn) ?? 'Add dates'}</span>
               </span>
               {active === 'checkIn' && draft.checkIn && (
-                <ClearButton label="Clear dates" onClick={() => setDraft((d) => ({ ...d, checkIn: null, checkOut: null }))} />
+                <ClearButton label="Clear check-in and checkout dates" onClick={() => setDraft((d) => ({ ...d, checkIn: null, checkOut: null }))} />
               )}
             </div>
             {divider('checkIn', 'checkOut')}

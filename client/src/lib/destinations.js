@@ -1,11 +1,11 @@
-import axios from "axios";
+import { api } from "./api";
 
 // Destination suggestions from GET /api/places/destinations, shared by the
 // navbar search and the footer: fetched once per page load, retried on failure.
 let request = null;
 
 export const loadDestinations = () => {
-  request ??= axios
+  request ??= api
     .get("/places/destinations")
     .then(({ data }) => (Array.isArray(data) ? data : []))
     .catch(() => {

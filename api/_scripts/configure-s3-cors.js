@@ -7,7 +7,11 @@
 // Needs s3:PutBucketCors on the bucket (uses the same S3_* env vars as the API).
 require("dotenv").config({ quiet: true });
 const { PutBucketCorsCommand, GetBucketCorsCommand } = require("@aws-sdk/client-s3");
-const { BUCKET, s3 } = require("../lib/s3");
+const { loadConfig } = require("../_src/config");
+const { createPhotoStorage } = require("../_src/lib/s3");
+
+const { client, bucket: BUCKET } = createPhotoStorage(loadConfig().s3);
+const s3 = () => client;
 
 const DEFAULT_ORIGINS = [
     "http://localhost:5173",

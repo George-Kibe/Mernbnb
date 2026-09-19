@@ -1,12 +1,10 @@
 import { Link, useSearchParams } from "react-router";
-import toast, {Toaster} from "react-hot-toast"
-import Header from "../components/Header";
-import Footer from "../components/Footer"
+import toast from "react-hot-toast"
 import PhotoCarousel from "../components/photos/PhotoCarousel";
 import Pagination from "../components/Pagination";
 import { useState, useEffect, useMemo } from "react";
 import { apiFiltersFor, hasSearch, readSearch, searchParamsFor } from "../lib/search";
-import axios from "axios";
+import { api, errorMessage } from "../lib/api";
 
 // 12 fills whole rows at every breakpoint of the 1/2/3/4/6-column grid.
 const PAGE_SIZE = 12;
@@ -28,8 +26,10 @@ const IndexPage = () => {
   const page = Math.max(Number.parseInt(searchParams.get("page"), 10) || 1, 1);
   const search = useMemo(() => readSearch(searchParams), [searchParams]);
   const searchKey = new URLSearchParams(searchParamsFor(search)).toString();
-  const [result, setResult] = useState({ places: [], total: 0, totalPages: 0 });
-  const [loading, setLoading] = useState(true);
+  const requestKey = `${page}|${searchKey}`;
+  // The result remembers which request it answers; anything else is loading.
+  const [result, setResult] = useState({ key: null, places: [], total: 0, totalPages: 0 });
+  const loading = result.key !== requestKey;
 
   const withPage = (next) => {
     const params = new URLSearchParams(searchParams);
@@ -44,9 +44,8 @@ const IndexPage = () => {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     const filters = apiFiltersFor(readSearch(new URLSearchParams(searchKey)));
-    axios.get("/places", { params: { page, limit: PAGE_SIZE, ...filters } })
+    api.get("/places", { params: { page, limit: PAGE_SIZE, ...filters } })
       .then(({ data }) => {
         if (cancelled) return;
         if (!Array.isArray(data?.places)) throw new Error("Unexpected response from the server.");
@@ -55,19 +54,17 @@ const IndexPage = () => {
           setSearchParams(withPage(data.totalPages), { replace: true });
           return;
         }
-        setResult(data);
-        setLoading(false);
+        setResult({ ...data, key: requestKey });
       })
       .catch((error) => {
         if (cancelled) return;
-        toast.error(typeof error.response?.data === "string" ? error.response.data : error.message);
-        setResult({ places: [], total: 0, totalPages: 0 });
-        setLoading(false);
+        toast.error(errorMessage(error, "Could not load places."));
+        setResult({ key: requestKey, places: [], total: 0, totalPages: 0 });
       });
     return () => { cancelled = true; };
     // withPage only depends on the URL, which page/searchKey already track.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, searchKey]);
+  }, [requestKey]);
 
   // Carry dates and guests to the listing so its booking form is prefilled.
   const tripQuery = (() => {
@@ -78,9 +75,7 @@ const IndexPage = () => {
   const searching = hasSearch(search);
 
   return (
-    <div className='p-4 flex flex-col min-h-screen'>
-      <Toaster position="top-center" reverseOrder={false}></Toaster>
-      <Header />
+    <div className='flex flex-col'>
       {
         searching && !loading && result.total > 0 && (
           <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
@@ -135,7 +130,6 @@ const IndexPage = () => {
           />
         )
       }
-      <Footer />
     </div>
   )
 }

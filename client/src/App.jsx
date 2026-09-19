@@ -1,45 +1,61 @@
+/* eslint-disable react-refresh/only-export-components -- exports the route table for tests */
 import React from 'react'
 import { createBrowserRouter } from "react-router"
 // The DOM RouterProvider supplies ReactDOM.flushSync, which navigate(to, { flushSync: true }) needs.
 import { RouterProvider } from "react-router/dom"
 import { UserContextProvider } from './UserContext'
-import axios from 'axios'
-// Defaults to the same-origin /api (Vite proxies it in dev; Vercel rewrites it).
-axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL || "/api"
-// Send the login token so protected endpoints (photo uploads) know the user.
-axios.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token")
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
-//continue from 5:03:01
-//pages
-import IndexPage from "./pages/IndexPage";
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import PageNotFound from './pages/PageNotFound';
-import ProfilePage from './pages/ProfilePage'
+import Layout from './Layout'
+import RequireAuth from './components/RequireAuth'
+import ErrorPage from './pages/ErrorPage'
+import IndexPage from "./pages/IndexPage"
+import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
+import PageNotFound from './pages/PageNotFound'
 import PlacePage from './pages/PlacePage'
+import ProfileLayout from './pages/ProfileLayout'
+import AccountPage from './pages/AccountPage'
+import BookingsPage from './pages/BookingsPage'
+import BookingPage from './pages/BookingPage'
+import MyPlacesPage from './pages/MyPlacesPage'
+import PlaceFormPage from './pages/PlaceFormPage'
 
-const router = createBrowserRouter([
-  { path:"/", element: <IndexPage/> },
-  { path:"/login", element: <LoginPage/> },
-  { path:"/register", element: <RegisterPage/> },
-  { path:"/profile/:subpage?", element: <ProfilePage/> },
-  { path:"/profile/:subpage/:actionOrId", element: <ProfilePage/> },
-  { path:"/place/:id", element: <PlacePage/> },
+export const routes = [
+  {
+    element: <Layout />,
+    errorElement: <ErrorPage />,
+    children: [
+      { index: true, element: <IndexPage /> },
+      { path: "login", element: <LoginPage /> },
+      { path: "register", element: <RegisterPage /> },
+      { path: "place/:id", element: <PlacePage /> },
+      {
+        element: <RequireAuth />,
+        children: [
+          {
+            path: "profile",
+            element: <ProfileLayout />,
+            children: [
+              { index: true, element: <AccountPage /> },
+              { path: "bookings", element: <BookingsPage /> },
+              { path: "bookings/:id", element: <BookingPage /> },
+              { path: "places", element: <MyPlacesPage /> },
+              { path: "places/new", element: <PlaceFormPage /> },
+              { path: "places/:id", element: <PlaceFormPage /> },
+            ],
+          },
+        ],
+      },
+      { path: "*", element: <PageNotFound /> },
+    ],
+  },
+];
 
-  { path:"*", element: <PageNotFound/> },
-])
+const router = createBrowserRouter(routes);
 
-const App = () => {
-  return (
-    <UserContextProvider>
-      <main>
-        <RouterProvider router={router}></RouterProvider>
-      </main>
-    </UserContextProvider>
-  )
-}
+const App = () => (
+  <UserContextProvider>
+    <RouterProvider router={router} />
+  </UserContextProvider>
+)
 
 export default App

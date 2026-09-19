@@ -1,0 +1,98 @@
+# Production readiness audit
+
+**Scope:** `api/` (Express 5 + MongoDB) and `client/` (React 19 + Vite), plus the Vercel deployment. **Date:** September 2026.
+
+## Summary
+
+The app was not production-ready. Anyone could edit any listing, read anyone's bookings, forge login tokens (the signing secret was in the public repo), and fetch internal URLs through the server. Shared links to listings returned 404, and there were no tests, rate limits or logs.
+
+Everything that can be fixed in code has been fixed and covered by tests (API 164 tests, client 115 tests, coverage above 95% on every metric, enforced in CI). Three things still need a person with account access, listed under [Action required before deploying](#action-required-before-deploying). **Deploying without setting `JWT_SECRET` will take the API down.**
+
+## Findings
+
+Severity: **Critical** means it's exploitable now with serious impact; **High** means likely harm or broken core features; **Medium** means a real risk or defect; **Low** is hygiene.
+
+### Security
+
+| # | Severity | Finding | Resolution |
+| - | -------- | ------- | ---------- |
+| S1 | Critical | **The JWT signing secret was hard-coded** and committed to a public repo, so anyone could mint a token for any user. | Removed. `JWT_SECRET` (≥ 32 chars) is required in production; the API refuses to start without it. Tokens are pinned to HS256 and expire after 7 days. |
+| S2 | Critical | **No server-side authorization.** Owner and user IDs came from URLs and bodies: anyone could edit any listing (`PUT /places/:placeId/:ownerId`), create listings or bookings as someone else, and read anyone's bookings anonymously (confirmed on the live site). | Every write and every private read requires a verified token, and the user ID comes from the token. Ownership is checked on edits (`403`). Bookings are visible only to their guest and host (`404` otherwise). New `/me/places` and `/me/bookings` routes. |
+| S3 | Critical | **AWS access keys committed** to the public repo in 2023. AWS has quarantined the IAM user, which still allows uploads. | Code can't fix a leaked key; see *Action required*. |
+| S4 | High | **Password hashes returned** by register and login. | `select: false` plus a `toJSON` transform; tests assert hashes never leave the server. |
+| S5 | High | **SSRF / open proxy:** upload-by-link fetched any URL, on any method. | POST only. http(s) on ports 80/443; private, loopback, link-local and metadata IPs blocked at connect time (DNS-rebinding safe); every redirect re-checked; 10 MB cap; type sniffed from bytes, and SVG rejected. |
+| S6 | High | **No rate limiting:** 30 rapid requests were all served on production. | `express-rate-limit`: a global limit per IP; failed logins and registrations per IP, against brute force; listings, bookings and uploads per user. JSON `429` with standard `RateLimit` headers. |
+| S7 | High | **Booking price trusted from the client**, and no double-booking check. | The server computes nights × nightly price, validates dates (no past check-ins, ≤ 90 nights, capacity) and rejects overlapping bookings (`409`). |
+| S8 | Medium | **CORS open to every origin**; `X-Powered-By: Express` exposed; no security headers. | CORS allowlist (`CORS_ORIGINS`); helmet on the API. Vercel serves CSP (no inline scripts), `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy` and `Permissions-Policy`. |
+| S9 | Medium | **Unused `token` cookie** set without `httpOnly` / `secure` / `sameSite`. | Removed with `cookie-parser`; auth is Bearer-only, so there's no CSRF surface. |
+| S10 | Medium | **User enumeration:** login said "Not Found" for unknown emails. | Unknown email and wrong password get the same `401`. |
+| S11 | Medium | **No input validation** (Booking schema typo `require:` meant nothing was enforced). | zod validation on every body and query; Mongoose schemas with required fields, limits, enums and time formats. Impossible dates such as Feb 31 are rejected (a bug found by the new tests). |
+| S12 | Low | **No request body limit.** | 100 KB JSON limit (`413`). |
+
+### Reliability and correctness
+
+| # | Severity | Finding | Resolution |
+| - | -------- | ------- | ---------- |
+| R1 | High | **Deep links 404 on Vercel** (`/place/:id`, `/profile`, `/login`); shared listing links didn't work. | App fallback rewrite in `vercel.json`. |
+| R2 | High | **Implicit globals** (`placeDoc =`, `bookingDocs =`) shared between concurrent requests. | Gone with the route rewrite. |
+| R3 | Medium | **Errors returned as HTML pages or raw Mongo errors.** | Central handler: JSON `{ error, details?, requestId }`, with no stack traces or internals. |
+| R4 | Medium | **Invalid IDs caused 422/500s.** | ObjectId validation; unknown IDs → `404`. |
+| R5 | Medium | **No health check or graceful shutdown.** | `GET /api/health` (`503` when the DB is down); SIGTERM/SIGINT drain connections. |
+| R6 | Medium | **Client: `toast()` called during render, effects with missing dependencies, no loading, error or empty states, raw React Router crash screen.** | Shared layout with one toaster; `useFetch` with derived loading and retry; error boundary page; 404 page; empty states. ESLint's React Hooks rules pass. |
+| R7 | Medium | **Expired sessions never noticed** by the client. | Expired or malformed tokens discarded on load; an API `401` logs out with a message; login and logout sync across tabs. |
+| R8 | Low | **Booking dates shown a day early** for users west of UTC. | Dates formatted by UTC calendar day. |
+| R9 | Low | **Dead code:** legacy `uploads/` images, `App.css`, `react.svg`, commented routes. | Removed. |
+
+### Operability
+
+| # | Severity | Finding | Resolution |
+| - | -------- | ------- | ---------- |
+| O1 | High | **No logging** beyond `console.log`. | pino JSON logs, one line per request: method, path, status, duration and a request ID (echoed as `X-Request-Id`). 4xx at `warn`, 5xx at `error`; auth headers, cookies, passwords and tokens are redacted. |
+| O2 | High | **No tests or CI.** | 279 tests, coverage gates at 95% on lines, statements, functions and branches. GitHub Actions runs lint, tests, build and `npm audit` on every push and PR. |
+| O3 | Medium | **Configuration unvalidated;** secrets optional. | zod-validated config; production fails fast with a clear message. |
+| O4 | Medium | **Vercel would create one function per `.js` file** under `api/` (Hobby plan limit: 12). | Code moved to `_src/`, `_scripts/` and `_tests/`, which Vercel ignores; one function remains. |
+| O5 | Low | **Non-reproducible builds** (`npm install`). | `npm ci` in the Vercel build and in CI. |
+
+## Verification
+
+**Automated tests:**
+
+| Package | Tests | Statements | Branches | Functions | Lines |
+| ------- | ----- | ---------- | -------- | --------- | ----- |
+| API | 164 | 99.2% | 98.6% | 98.2% | 99.5% |
+| Client | 115 | 99.4% | 97.2% | 99.1% | 99.8% |
+
+**End to end:** a browser run against the API in production mode, with an in-memory MongoDB and an emulated S3, passed these checks:
+- sign-up with automatic login;
+- creating a listing with a direct-to-S3 photo upload;
+- a server-priced booking, and double-booking rejected;
+- the protected-route redirect;
+- a tampered token forced to log out;
+- the 6th failed login rate-limited;
+- structured logs containing no secrets.
+
+**Other checks:** ESLint is clean in both packages, and `npm audit` reports 0 vulnerabilities in both.
+
+## Action required before deploying
+
+1. **Set `JWT_SECRET` in Vercel** (Production and Preview) to 32+ random characters:
+   `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
+   Without it the API refuses to start. Everyone is logged out once, which is intended: the old secret is public.
+2. **Rotate the AWS keys** (S3): delete every key ever committed, create a new one, and update `api/.env` and Vercel. Then detach `AWSCompromisedKeyQuarantineV2` and check CloudTrail. Until then, photo previews stay broken and the leaked key can still upload.
+3. **Deploy the API and client together.** The API contract changed (auth headers, `/me/*` routes, booking body), so an old client won't work with the new API or vice versa.
+4. Re-run `npm run s3:cors` if you serve the app from any other domain.
+
+## Remaining risks and recommendations
+
+In rough priority order:
+
+1. **Rate limits are per instance.** The in-memory store stops a single abusive client on one instance, but serverless scale-out multiplies the limits. For real DDoS protection, enable Vercel's firewall or attack mode and move `express-rate-limit` to a shared store (for example Redis or Upstash); it's a one-line store option.
+2. **Tokens live in `localStorage`,** so an XSS bug could steal them. The CSP forbids inline and third-party scripts, which reduces this. The stronger fix is `httpOnly` `SameSite` cookies with CSRF protection.
+3. **Two simultaneous bookings for the same dates** can both pass the overlap check (a race). Use a MongoDB transaction, or a per-place lock, if volume grows.
+4. **Orphaned S3 objects:** photos uploaded but never saved, or later removed, stay in the bucket. Add an S3 lifecycle rule and delete removed keys on update.
+5. **Missing account features:** email verification, password reset, account deletion and listing deletion.
+6. **Monitoring:** logs go to Vercel's log viewer. Add log drains, error tracking (Sentry or similar) and an uptime check on `/api/health`.
+7. **Backups:** confirm MongoDB Atlas backups are enabled.
+8. **CSP allows `'unsafe-inline'` styles,** needed by the toast library and inline style attributes. That's low risk, but could be tightened.
+9. **Pagination uses `skip`,** which slows at very high page numbers. Consider cursor pagination if listings grow into the tens of thousands.
+10. **E2E tests aren't in CI yet.** The browser flow above was run manually; consider Playwright in CI.

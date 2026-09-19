@@ -6,7 +6,7 @@ import ThemeSwitcher from './ThemeSwitcher'
 
 // Airbnb's account menu: hamburger + avatar button with a dropdown.
 const UserMenu = () => {
-  const { user, setUser } = useContext(UserContext);
+  const { user, logout: endSession } = useContext(UserContext);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -30,8 +30,7 @@ const UserMenu = () => {
   const logout = async () => {
     setOpen(false);
     await navigate('/', { flushSync: true });
-    localStorage.removeItem('token');
-    setUser(null);
+    endSession();
     toast.success('Logged out successfully');
   };
 

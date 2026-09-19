@@ -30,12 +30,16 @@ const PhotoUploader = ({ photos, onChange, toast, onUploadingChange }) => {
   const [link, setLink] = useState('');
   const [addingLink, setAddingLink] = useState(false);
   // url -> blob URL of the file the host picked, so new photos show instantly.
-  const localPreviews = useRef(new Map());
+  const [localPreviews, setLocalPreviews] = useState(() => new Map());
+  const previewsForCleanup = useRef(localPreviews);
   // Uploaded photos whose stored copy can't be displayed (guests won't see them).
   const [unviewable, setUnviewable] = useState(() => new Set());
 
+  useEffect(() => {
+    previewsForCleanup.current = localPreviews;
+  }, [localPreviews]);
   useEffect(() => () => {
-    localPreviews.current.forEach((preview) => URL.revokeObjectURL(preview));
+    previewsForCleanup.current.forEach((preview) => URL.revokeObjectURL(preview));
   }, []);
 
   const onRemoteStatus = useCallback((url, ok) => {
@@ -85,10 +89,12 @@ const PhotoUploader = ({ photos, onChange, toast, onUploadingChange }) => {
     );
 
     // Keep the local preview of each uploaded file; drop the failed ones.
+    const kept = [];
     results.forEach((result, i) => {
-      if (result.url) localPreviews.current.set(result.url, items[i].preview);
+      if (result.url) kept.push([result.url, items[i].preview]);
       else URL.revokeObjectURL(items[i].preview);
     });
+    if (kept.length) setLocalPreviews((prev) => new Map([...prev, ...kept]));
     const urls = results.filter((r) => r.url).map((r) => r.url);
     if (urls.length) onChange((prev) => [...(prev ?? []), ...urls]);
     const errors = [...new Set(results.filter((r) => r.error).map((r) => r.error))];
@@ -118,10 +124,14 @@ const PhotoUploader = ({ photos, onChange, toast, onUploadingChange }) => {
   }
   const removePhoto = (url) => {
     onChange((prev) => (prev ?? []).filter((photo) => photo !== url));
-    const preview = localPreviews.current.get(url);
+    const preview = localPreviews.get(url);
     if (preview) {
       URL.revokeObjectURL(preview);
-      localPreviews.current.delete(url);
+      setLocalPreviews((prev) => {
+        const next = new Map(prev);
+        next.delete(url);
+        return next;
+      });
     }
     onRemoteStatus(url, true);
   };
@@ -246,7 +256,7 @@ const PhotoUploader = ({ photos, onChange, toast, onUploadingChange }) => {
               >
                 <UploadedPhoto
                   url={url}
-                  preview={localPreviews.current.get(url)}
+                  preview={localPreviews.get(url)}
                   alt={index === 0 ? 'Cover photo' : `Photo ${index + 1}`}
                   onRemoteStatus={onRemoteStatus}
                 />

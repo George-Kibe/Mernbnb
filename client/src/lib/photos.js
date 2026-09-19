@@ -1,4 +1,5 @@
 import axios from "axios";
+import { api, errorMessage } from "./api";
 
 export const ACCEPTED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif"];
 export const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -20,8 +21,7 @@ export const photoProblem = (file) => {
   return null;
 };
 
-export const errorMessage = (error, fallback) =>
-  typeof error?.response?.data === "string" ? error.response.data : fallback;
+export { errorMessage };
 
 // Uploads files to S3 with presigned URLs.
 // onProgress(fileIndex, fraction) reports per-file progress.
@@ -32,7 +32,7 @@ export const uploadPhotos = async (files, onProgress) => {
     const batch = files.slice(start, start + MAX_FILES_PER_REQUEST);
     let targets;
     try {
-      ({ data: targets } = await axios.post("/uploads/presign", {
+      ({ data: targets } = await api.post("/uploads/presign", {
         files: batch.map(({ type, size }) => ({ type, size })),
       }));
     } catch (error) {
@@ -62,6 +62,6 @@ export const uploadPhotos = async (files, onProgress) => {
 
 // The server downloads the image and stores it in S3. Resolves to its URL.
 export const addPhotoByLink = async (link) => {
-  const { data } = await axios.post("/uploads/by-link", { link });
+  const { data } = await api.post("/uploads/by-link", { link });
   return data.url;
 };

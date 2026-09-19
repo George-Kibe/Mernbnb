@@ -2,11 +2,6 @@ const crypto = require("crypto");
 const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
-const BUCKET = process.env.S3_BUCKET || "mernbnb-images-bucket";
-const REGION = process.env.S3_REGION || "eu-west-1";
-// Optional S3-compatible endpoint (MinIO, a local emulator). Unset for AWS.
-const ENDPOINT = process.env.S3_ENDPOINT?.replace(/\/$/, "") || undefined;
-
 // Content types we accept, mapped to the file extension used in the key.
 const IMAGE_TYPES = {
     "image/jpeg": "jpg",
@@ -28,145 +23,121 @@ const VIEW_URL_TTL_SECONDS = 2 * 60 * 60;
 
 class UploadError extends Error {}
 
-let client;
-const s3 = () => {
-    client ??= new S3Client({
-        region: REGION,
-        endpoint: ENDPOINT,
-        forcePathStyle: Boolean(ENDPOINT),
-        credentials: process.env.S3_ACCESS_KEY
-            ? {
-                  accessKeyId: process.env.S3_ACCESS_KEY,
-                  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
-              }
-            : undefined, // fall back to the default AWS credential chain
-    });
-    return client;
-};
-
-const newPhotoKey = (userId, contentType) =>
-    `places/${userId}/${crypto.randomUUID()}.${IMAGE_TYPES[contentType]}`;
-
-// Presigned PUT URLs for a batch of files described as { type, size }.
-// Content-Type and Content-Length are signed, so S3 rejects an upload whose
-// type or size differs from what was validated here.
-const createUploadUrls = async (userId, files) => {
-    if (!Array.isArray(files) || files.length === 0) {
-        throw new UploadError("No files to upload.");
-    }
-    if (files.length > MAX_FILES_PER_REQUEST) {
-        throw new UploadError(`Upload at most ${MAX_FILES_PER_REQUEST} photos at a time.`);
-    }
-    for (const file of files) {
-        if (!IMAGE_TYPES[file?.type]) {
-            throw new UploadError("Only JPEG, PNG, WebP, AVIF and GIF images are supported.");
-        }
-        if (!Number.isInteger(file.size) || file.size <= 0 || file.size > MAX_IMAGE_BYTES) {
-            throw new UploadError("Each photo must be smaller than 10 MB.");
-        }
-    }
-    return Promise.all(
-        files.map(async ({ type, size }) => {
-            const key = newPhotoKey(userId, type);
-            const uploadUrl = await getSignedUrl(
-                s3(),
-                new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: type, ContentLength: size }),
-                {
-                    expiresIn: UPLOAD_URL_TTL_SECONDS,
-                    signableHeaders: new Set(["content-type", "content-length"]),
-                }
-            );
-            return { key, uploadUrl, url: await photoUrl(key) };
-        })
-    );
-};
-
-const putPhoto = (key, body, contentType) =>
-    s3().send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }));
-
-// URL prefixes under which this bucket's objects can appear. Photos saved
-// before the presigned-URL change are stored as full public URLs.
-const BUCKET_URL_PREFIXES = [
-    `https://${BUCKET}.s3.amazonaws.com/`,
-    `https://${BUCKET}.s3.${REGION}.amazonaws.com/`,
-    `https://s3.${REGION}.amazonaws.com/${BUCKET}/`,
-    `https://s3.amazonaws.com/${BUCKET}/`,
-    ENDPOINT && `${ENDPOINT}/${BUCKET}/`,
-].filter(Boolean);
-
 const isAbsoluteUrl = (value) => /^https?:\/\//i.test(value);
 
-// Reduces a stored photo, or a (signed) URL of one, to its S3 key. Anything
-// that isn't in our bucket (legacy external URLs) is returned unchanged.
-const toPhotoKey = (value) => {
-    const prefix = BUCKET_URL_PREFIXES.find((p) => value.startsWith(p));
-    if (!prefix) return value;
-    return decodeURIComponent(value.slice(prefix.length).split("?")[0]);
-};
+// Photo storage in S3 (or an S3-compatible endpoint). Photos are stored as
+// keys; clients get signed URLs.
+const createPhotoStorage = ({ bucket, region, endpoint, accessKeyId, secretAccessKey }, { logger, now = Date.now } = {}) => {
+    const client = new S3Client({
+        region,
+        endpoint,
+        forcePathStyle: Boolean(endpoint),
+        // Without explicit keys, fall back to the default AWS credential chain.
+        credentials: accessKeyId ? { accessKeyId, secretAccessKey } : undefined,
+    });
 
-// Cleans the photos array sent by the client before it is saved.
-const normalizePhotos = (photos) => {
-    if (!Array.isArray(photos)) return [];
-    const keys = photos
-        .filter((photo) => typeof photo === "string" && photo.trim())
-        .map((photo) => toPhotoKey(photo.trim()));
-    return [...new Set(keys)].slice(0, MAX_PHOTOS_PER_PLACE);
-};
+    const newPhotoKey = (userId, contentType) =>
+        `places/${userId}/${crypto.randomUUID()}.${IMAGE_TYPES[contentType]}`;
 
-let signedUrlCache = { windowStart: 0, urls: new Map() };
-let warnedAboutSigning = false;
+    // URL prefixes under which this bucket's objects can appear. Photos saved
+    // before the presigned-URL change are stored as full public URLs.
+    const prefixes = [
+        `https://${bucket}.s3.amazonaws.com/`,
+        `https://${bucket}.s3.${region}.amazonaws.com/`,
+        `https://s3.${region}.amazonaws.com/${bucket}/`,
+        `https://s3.amazonaws.com/${bucket}/`,
+        endpoint && `${endpoint}/${bucket}/`,
+    ].filter(Boolean);
 
-// A signed GET URL for a stored photo.
-const photoUrl = async (value) => {
-    const key = toPhotoKey(value);
-    if (isAbsoluteUrl(key)) return key;
+    // Reduces a stored photo, or a (signed) URL of one, to its S3 key. Anything
+    // not in our bucket (legacy external URLs) is returned unchanged.
+    const toPhotoKey = (value) => {
+        const prefix = prefixes.find((p) => value.startsWith(p));
+        return prefix ? decodeURIComponent(value.slice(prefix.length).split("?")[0]) : value;
+    };
 
-    const now = Date.now();
-    const windowStart = now - (now % VIEW_URL_WINDOW_MS);
-    if (signedUrlCache.windowStart !== windowStart) {
-        signedUrlCache = { windowStart, urls: new Map() };
-    }
-    const cached = signedUrlCache.urls.get(key);
-    if (cached) return cached;
+    // Cleans the photos array sent by the client before it is saved.
+    const normalizePhotos = (photos) => {
+        if (!Array.isArray(photos)) return [];
+        const keys = photos
+            .filter((photo) => typeof photo === "string" && photo.trim())
+            .map((photo) => toPhotoKey(photo.trim()));
+        return [...new Set(keys)].slice(0, MAX_PHOTOS_PER_PLACE);
+    };
 
-    try {
-        const url = await getSignedUrl(s3(), new GetObjectCommand({ Bucket: BUCKET, Key: key }), {
-            expiresIn: VIEW_URL_TTL_SECONDS,
-            signingDate: new Date(windowStart),
-        });
-        signedUrlCache.urls.set(key, url);
-        return url;
-    } catch (error) {
-        // Without credentials we can't sign; a public URL still works if the
-        // bucket allows public reads.
-        if (!warnedAboutSigning) {
-            console.error("Could not sign photo URLs, serving unsigned URLs:", error.message);
-            warnedAboutSigning = true;
+    const publicUrl = (key) =>
+        endpoint ? `${endpoint}/${bucket}/${encodeURI(key)}` : `https://${bucket}.s3.${region}.amazonaws.com/${encodeURI(key)}`;
+
+    let cache = { windowStart: 0, urls: new Map() };
+    let warnedAboutSigning = false;
+
+    // A signed GET URL for a stored photo.
+    const photoUrl = async (value) => {
+        const key = toPhotoKey(value);
+        if (isAbsoluteUrl(key)) return key;
+
+        const time = now();
+        const windowStart = time - (time % VIEW_URL_WINDOW_MS);
+        if (cache.windowStart !== windowStart) cache = { windowStart, urls: new Map() };
+        const cached = cache.urls.get(key);
+        if (cached) return cached;
+
+        try {
+            const url = await getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
+                expiresIn: VIEW_URL_TTL_SECONDS,
+                signingDate: new Date(windowStart),
+            });
+            cache.urls.set(key, url);
+            return url;
+        } catch (error) {
+            // Without credentials we can't sign; a public URL still works if
+            // the bucket allows public reads.
+            if (!warnedAboutSigning) {
+                logger?.warn({ err: error }, "Could not sign photo URLs; serving unsigned URLs");
+                warnedAboutSigning = true;
+            }
+            return publicUrl(key);
         }
-        return ENDPOINT
-            ? `${ENDPOINT}/${BUCKET}/${encodeURI(key)}`
-            : `https://${BUCKET}.s3.${REGION}.amazonaws.com/${encodeURI(key)}`;
-    }
+    };
+
+    // A place (document or plain object) with `photos` resolved to signed URLs.
+    const withPhotoUrls = async (place) => {
+        if (!place) return place;
+        const plain = typeof place.toJSON === "function" ? place.toJSON() : { ...place };
+        plain.photos = await Promise.all((plain.photos || []).map(photoUrl));
+        return plain;
+    };
+
+    // Presigned PUT URLs for files described as { type, size }. Content-Type
+    // and Content-Length are signed, so S3 rejects any other type or size.
+    const createUploadUrls = async (userId, files) => {
+        if (!Array.isArray(files) || files.length === 0) throw new UploadError("No files to upload.");
+        if (files.length > MAX_FILES_PER_REQUEST) {
+            throw new UploadError(`Upload at most ${MAX_FILES_PER_REQUEST} photos at a time.`);
+        }
+        for (const file of files) {
+            if (!IMAGE_TYPES[file?.type]) throw new UploadError("Only JPEG, PNG, WebP, AVIF and GIF images are supported.");
+            if (!Number.isInteger(file.size) || file.size <= 0 || file.size > MAX_IMAGE_BYTES) {
+                throw new UploadError("Each photo must be smaller than 10 MB.");
+            }
+        }
+        return Promise.all(
+            files.map(async ({ type, size }) => {
+                const key = newPhotoKey(userId, type);
+                const uploadUrl = await getSignedUrl(
+                    client,
+                    new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: type, ContentLength: size }),
+                    { expiresIn: UPLOAD_URL_TTL_SECONDS, signableHeaders: new Set(["content-type", "content-length"]) }
+                );
+                return { key, uploadUrl, url: await photoUrl(key) };
+            })
+        );
+    };
+
+    const putPhoto = (key, body, contentType) =>
+        client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
+
+    return { client, bucket, newPhotoKey, toPhotoKey, normalizePhotos, photoUrl, withPhotoUrls, createUploadUrls, putPhoto };
 };
 
-// A place (document or plain object) with `photos` resolved to signed URLs.
-const withPhotoUrls = async (place) => {
-    if (!place) return place;
-    const plain = typeof place.toObject === "function" ? place.toObject() : { ...place };
-    plain.photos = await Promise.all((plain.photos || []).map(photoUrl));
-    return plain;
-};
-
-module.exports = {
-    BUCKET,
-    IMAGE_TYPES,
-    MAX_IMAGE_BYTES,
-    UploadError,
-    s3,
-    newPhotoKey,
-    createUploadUrls,
-    putPhoto,
-    normalizePhotos,
-    photoUrl,
-    withPhotoUrls,
-};
+module.exports = { createPhotoStorage, UploadError, IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_FILES_PER_REQUEST, MAX_PHOTOS_PER_PLACE };

@@ -49,7 +49,7 @@ const sniffImageType = (buffer) => {
     return null;
 };
 
-const parseLink = (link) => {
+const parseLink = (link, blockPrivateAddresses) => {
     let url;
     try {
         url = new URL(link);
@@ -62,22 +62,22 @@ const parseLink = (link) => {
     if (url.username || url.password) {
         throw new FetchImageError("Links with credentials are not supported.");
     }
-    if (url.port && !["80", "443"].includes(url.port)) {
+    if (blockPrivateAddresses && url.port && !["80", "443"].includes(url.port)) {
         throw new FetchImageError("Links must use the standard web ports.");
     }
     // IP literals skip DNS lookup entirely, so check them here.
     const host = url.hostname.replace(/^\[|\]$/g, "");
-    if (net.isIP(host) && isBlockedAddress(host)) {
+    if (blockPrivateAddresses && net.isIP(host) && isBlockedAddress(host)) {
         throw new FetchImageError("That link points to a private address.");
     }
     return url;
 };
 
-const requestOnce = (url, { maxBytes, deadline }) =>
+const requestOnce = (url, { maxBytes, deadline, blockPrivateAddresses }) =>
     new Promise((resolve, reject) => {
         const transport = url.protocol === "https:" ? https : http;
         const request = transport.get(url, {
-            lookup: safeLookup,
+            lookup: blockPrivateAddresses ? safeLookup : dns.lookup,
             headers: { "User-Agent": "AirBuenas-ImageFetcher/1.0", Accept: "image/*" },
             timeout: Math.max(1, deadline - Date.now()),
         });
@@ -128,13 +128,15 @@ const requestOnce = (url, { maxBytes, deadline }) =>
 
 // Downloads an image from a user-supplied link without exposing internal
 // services. Returns { buffer, type } where type comes from the file's bytes.
-const fetchImage = async (link, { maxBytes, timeoutMs = 10_000, maxRedirects = 3 } = {}) => {
+// `blockPrivateAddresses` exists only so tests can use a local server; it is
+// never derived from user input.
+const fetchImage = async (link, { maxBytes, timeoutMs = 10_000, maxRedirects = 3, blockPrivateAddresses = true } = {}) => {
     const deadline = Date.now() + timeoutMs;
-    let url = parseLink(link);
+    let url = parseLink(link, blockPrivateAddresses);
     for (let hop = 0; hop <= maxRedirects; hop++) {
-        const result = await requestOnce(url, { maxBytes, deadline });
+        const result = await requestOnce(url, { maxBytes, deadline, blockPrivateAddresses });
         if (result.redirect) {
-            url = parseLink(result.redirect);
+            url = parseLink(result.redirect, blockPrivateAddresses);
             continue;
         }
         const type = sniffImageType(result.buffer);
@@ -144,4 +146,4 @@ const fetchImage = async (link, { maxBytes, timeoutMs = 10_000, maxRedirects = 3
     throw new FetchImageError("That link redirects too many times.");
 };
 
-module.exports = { fetchImage, FetchImageError };
+module.exports = { fetchImage, FetchImageError, isBlockedAddress, sniffImageType, safeLookup };
