@@ -17,7 +17,7 @@ import { EmptyState, ErrorState, LoadingState } from "./Status";
 const emptyHome = () =>
   server.use(
     http.get("*/api/places", () => HttpResponse.json({ places: [], page: 1, limit: 12, total: 0, totalPages: 0 })),
-    http.get("*/api/places/destinations", () => HttpResponse.json([{ name: "Nairobi", count: 5 }, { name: "Kilifi", count: 1 }])),
+    http.get("*/api/places/destinations", () => HttpResponse.json([{ name: "Nairobi", slug: "nairobi", count: 5, minPrice: 4000 }, { name: "Kilifi", slug: "kilifi", count: 1, minPrice: 9000 }])),
   );
 
 describe("UserContext", () => {
@@ -119,7 +119,7 @@ describe("Header and UserMenu", () => {
     await user.click(button);
     expect(screen.getAllByRole("menuitem").map((el) => el.textContent)).toEqual(["Trips", "Manage listings", "Create a new listing", "Account", "Log out"]);
     await user.click(screen.getByRole("menuitem", { name: "Account" }));
-    expect(router.state.location.pathname).toBe("/profile");
+    await waitFor(() => expect(router.state.location.pathname).toBe("/profile")); // after the page loads
     await user.click(screen.getByRole("button", { name: "Account menu for Amina" }));
     await user.click(screen.getByRole("menuitem", { name: "Log out" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
@@ -139,7 +139,7 @@ describe("Footer", () => {
     emptyHome();
     renderApp("/");
     const nairobi = await screen.findByRole("link", { name: /Nairobi\s*5 stays/ });
-    expect(nairobi).toHaveAttribute("href", "/?location=Nairobi");
+    expect(nairobi).toHaveAttribute("href", "/stays/nairobi");
     expect(screen.getByRole("link", { name: /Kilifi\s*1 stay$/ })).toBeInTheDocument();
     const support = screen.getByRole("navigation", { name: "Support" });
     expect(within(support).getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login");

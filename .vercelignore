@@ -1,0 +1,18 @@
+# Not needed at runtime. Vercel turns every .js/.mjs file under api/ into its
+# own serverless function, so tooling configs would otherwise be deployed as
+# functions (see CLAUDE.md: code lives in underscore folders).
+api/_tests
+api/eslint.config.mjs
+api/vitest.config.mjs
+
+# Local-only files, in case of a CLI deploy (`vercel`) from a working copy:
+# secrets never get uploaded, and coverage reports' .js files would also
+# become functions.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/coverage
+**/node_modules

@@ -1,11 +1,17 @@
 import React, { useRef, useState } from 'react'
+import { CARD_SIZES, srcSetFor } from '../../lib/images'
 
 const MAX_DOTS = 5;
 
 // Listing-card image carousel. Lives inside a <Link>, so the controls
-// swallow their clicks instead of navigating.
-const PhotoCarousel = ({ photos = [], alt }) => {
+// swallow their clicks instead of navigating. `priority` is for cards at the
+// top of the page: "eager" loads the cover right away instead of lazily, and
+// "high" also puts it ahead of other downloads (the page's main image).
+const PhotoCarousel = ({ photos = [], alt, priority }) => {
   const [index, setIndex] = useState(0);
+  // The next photo is fetched once someone shows interest in the card.
+  const [engaged, setEngaged] = useState(false);
+  const engage = () => setEngaged(true);
   const touchStartX = useRef(null);
   const last = photos.length - 1;
 
@@ -33,7 +39,9 @@ const PhotoCarousel = ({ photos = [], alt }) => {
   return (
     <div
       className="group/carousel relative aspect-square overflow-hidden rounded-xl bg-gray-100"
-      onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+      onPointerEnter={engage}
+      onFocus={engage}
+      onTouchStart={(e) => { engage(); touchStartX.current = e.touches[0].clientX; }}
       onTouchEnd={(e) => {
         if (touchStartX.current === null) return;
         const dx = e.changedTouches[0].clientX - touchStartX.current;
@@ -44,9 +52,18 @@ const PhotoCarousel = ({ photos = [], alt }) => {
       <div className="flex h-full transition-transform duration-300 ease-out" style={{ transform: `translateX(-${index * 100}%)` }}>
         {photos.map((src, i) => (
           <div key={src} className="h-full w-full shrink-0">
-            {/* Only the current photo and its neighbour are loaded. */}
-            {i <= index + 1 && (
-              <img src={src} alt={`${alt} — photo ${i + 1}`} loading="lazy" draggable={false} className="h-full w-full object-cover" />
+            {/* Only the current photo (and, once engaged, the next) is loaded. */}
+            {i <= index + (engaged ? 1 : 0) && (
+              <img
+                srcSet={srcSetFor(src)}
+                sizes={CARD_SIZES}
+                loading={priority && i === 0 ? 'eager' : 'lazy'}
+                fetchPriority={priority === 'high' && i === 0 ? 'high' : undefined}
+                src={src}
+                alt={`${alt} — photo ${i + 1}`}
+                draggable={false}
+                className="h-full w-full object-cover"
+              />
             )}
           </div>
         ))}

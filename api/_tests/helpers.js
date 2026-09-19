@@ -2,9 +2,10 @@
 // does) so tests and app share one instance of mongoose, models and spies.
 const crypto = require("crypto");
 const mongoose = require("mongoose");
-const pino = require("pino");
 const bcrypt = require("bcryptjs");
+const { Writable } = require("stream");
 const { loadConfig } = require("../_src/config");
+const { createLogger } = require("../_src/logger");
 const { createDatabase } = require("../_src/db");
 const { createPhotoStorage } = require("../_src/lib/s3");
 const { createApp } = require("../_src/app");
@@ -12,9 +13,25 @@ const { signToken } = require("../_src/middleware/auth");
 const User = require("../_src/models/User");
 const Place = require("../_src/models/Place");
 const Booking = require("../_src/models/Booking");
+const PasswordReset = require("../_src/models/PasswordReset");
 
 const JWT_SECRET = "test-secret-that-is-at-least-32-characters-long";
-const silentLogger = pino({ level: "silent" });
+const silentLogger = createLogger({ env: "test", logLevel: "silent" });
+
+// A logger that keeps what it writes: `lines` holds the parsed JSON entries.
+// find(message) returns the first entry with that message.
+const captureLogger = (logLevel = "debug") => {
+    const lines = [];
+    const stream = new Writable({
+        write(chunk, encoding, done) {
+            lines.push(JSON.parse(chunk));
+            done();
+        },
+    });
+    const logger = createLogger({ env: "production", logLevel }, { stream });
+    const find = (message) => lines.find((line) => (message instanceof RegExp ? message.test(line.message) : line.message === message));
+    return { logger, lines, find };
+};
 
 const testStorage = (overrides = {}) =>
     createPhotoStorage(
@@ -23,7 +40,7 @@ const testStorage = (overrides = {}) =>
     );
 
 // A fresh app on its own database. `env` overrides config values.
-const makeApp = ({ mongoUri, env = {}, storage = testStorage(), fetchImage, now, db } = {}) => {
+const makeApp = ({ mongoUri, env = {}, storage = testStorage(), fetchImage, now, db, loadShell, mailer, logger = silentLogger } = {}) => {
     const config = loadConfig({
         NODE_ENV: "test",
         JWT_SECRET,
@@ -32,10 +49,11 @@ const makeApp = ({ mongoUri, env = {}, storage = testStorage(), fetchImage, now,
         AUTH_RATE_LIMIT_MAX: "10000",
         WRITE_RATE_LIMIT_MAX: "10000",
         UPLOAD_RATE_LIMIT_MAX: "10000",
+        RESET_RATE_LIMIT_MAX: "10000",
         ...env,
     });
-    const database = db ?? createDatabase(config.mongoUrl, silentLogger);
-    const app = createApp({ config, logger: silentLogger, db: database, storage, fetchImage, now });
+    const database = db ?? createDatabase(config.mongoUrl, logger);
+    const app = createApp({ config, logger, db: database, storage, fetchImage, now, loadShell, mailer });
     return { app, config, db: database, storage };
 };
 
@@ -86,8 +104,14 @@ const createBooking = (place, guest, overrides = {}) =>
         ...overrides,
     });
 
+// A mailer that keeps what it's asked to send in `sent`.
+const fakeMailer = () => {
+    const sent = [];
+    return { enabled: true, transport: "fake", sent, send: async (message) => { sent.push(message); return { messageId: `m${sent.length}` }; } };
+};
+
 const clearDatabase = async () => {
-    await Promise.all([User.deleteMany({}), Place.deleteMany({}), Booking.deleteMany({})]);
+    await Promise.all([User.deleteMany({}), Place.deleteMany({}), Booking.deleteMany({}), PasswordReset.deleteMany({})]);
 };
 
 const closeDatabase = async () => {
@@ -96,6 +120,6 @@ const closeDatabase = async () => {
 };
 
 module.exports = {
-    JWT_SECRET, PASSWORD, silentLogger, testStorage, makeApp, databaseUri, createUser, placeFields,
-    createPlace, createBooking, clearDatabase, closeDatabase, User, Place, Booking,
+    JWT_SECRET, PASSWORD, silentLogger, captureLogger, testStorage, makeApp, databaseUri, createUser, placeFields,
+    createPlace, createBooking, clearDatabase, closeDatabase, fakeMailer, User, Place, Booking, PasswordReset,
 };

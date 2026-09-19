@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { COVER_SIZES, srcSetFor } from '../../lib/images'
 
 // Tile classes for the desktop grid (4 columns x 2 rows): one large photo on
 // the left and up to four on the right, adapting when there are fewer.
@@ -9,6 +10,14 @@ const LAYOUTS = {
   4: ['col-span-2 row-span-2', 'col-span-2', 'col-span-1', 'col-span-1'],
   5: ['col-span-2 row-span-2', 'col-span-1', 'col-span-1', 'col-span-1', 'col-span-1'],
 };
+
+// The cover photo is the page's largest image, so it loads first. Both
+// layouts use the same srcset and sizes for it, so the browser fetches it
+// once whichever is shown; the other photos load lazily (the hidden layout's
+// never do). `src` comes last so the browser sees srcset, sizes and loading
+// before it starts a download.
+const coverProps = (src) => ({ srcSet: srcSetFor(src), sizes: COVER_SIZES, loading: 'eager', fetchPriority: 'high' });
+const tileProps = (src) => ({ srcSet: srcSetFor(src), sizes: '(min-width: 768px) 25vw, 100vw', loading: 'lazy' });
 
 // Listing-page photo header. onOpen(index) opens the photo tour.
 const PhotoGrid = ({ photos = [], title, onOpen }) => {
@@ -31,7 +40,7 @@ const PhotoGrid = ({ photos = [], title, onOpen }) => {
       <div className="hidden h-[min(60vh,32rem)] grid-cols-4 grid-rows-2 gap-2 overflow-hidden rounded-xl md:grid">
         {shown.map((src, i) => (
           <button key={src} type="button" onClick={() => onOpen(i)} className={`overflow-hidden bg-gray-100 p-0 ${layout[i]}`}>
-            <img src={src} alt={`${title} — photo ${i + 1}`} className="h-full w-full object-cover transition hover:brightness-90" />
+            <img {...(i === 0 ? coverProps(src) : tileProps(src))} src={src} alt={`${title} — photo ${i + 1}`} className="h-full w-full object-cover transition hover:brightness-90" />
           </button>
         ))}
       </div>
@@ -43,7 +52,7 @@ const PhotoGrid = ({ photos = [], title, onOpen }) => {
       >
         {photos.map((src, i) => (
           <button key={src} type="button" onClick={() => onOpen(i)} className="h-full w-full shrink-0 snap-center bg-gray-100 p-0">
-            <img src={src} alt={`${title} — photo ${i + 1}`} loading={i === 0 ? 'eager' : 'lazy'} className="h-full w-full object-cover" />
+            <img {...(i === 0 ? coverProps(src) : { ...tileProps(src), sizes: '100vw' })} src={src} alt={`${title} — photo ${i + 1}`} className="h-full w-full object-cover" />
           </button>
         ))}
       </div>

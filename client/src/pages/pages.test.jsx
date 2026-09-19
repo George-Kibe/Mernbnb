@@ -331,7 +331,7 @@ describe("PlaceFormPage", () => {
     );
     const { router } = renderApp("/profile/places/new", { user: HOST });
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Create listing" }));
+    await user.click(await screen.findByRole("button", { name: "Create listing" })); // the page loads on demand
     const alert = screen.getByRole("alert");
     expect(within(alert).getByText("Add a title.")).toBeInTheDocument();
     expect(within(alert).getByText("Add at least one photo.")).toBeInTheDocument();
@@ -412,7 +412,7 @@ describe("PlaceFormPage", () => {
     server.use(http.post("*/api/uploads/by-link", () => new Promise((resolve) => { release = () => resolve(HttpResponse.json({ key: "k", url: "https://cdn.test/k.jpg" }, { status: 201 })); })));
     renderApp("/profile/places/new", { user: HOST });
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Or add a photo from a link"), "https://example.com/a.jpg{Enter}");
+    await user.type(await screen.findByLabelText("Or add a photo from a link"), "https://example.com/a.jpg{Enter}");
     await screen.findByRole("button", { name: "Adding…" });
     await user.click(screen.getByRole("button", { name: "Create listing" }));
     expect(await screen.findByText("Wait for your photos to finish uploading.")).toBeInTheDocument();

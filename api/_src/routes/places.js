@@ -4,6 +4,7 @@ const Place = require("../models/Place");
 const Booking = require("../models/Booking");
 const { validate, objectIdParam, dateOnly, toUtcDay } = require("../middleware/validate");
 const { notFound, forbidden } = require("../errors");
+const { listDestinations } = require("../lib/destinations");
 
 const PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 50;
@@ -40,7 +41,7 @@ const placeBody = z.object({
     price: z.coerce.number().int("Use a whole number for the price.").min(1, "Set a nightly price.").max(10_000_000),
 });
 
-// Mongo filter for the home-page search.
+// Mongo filter for the home-page search (and destination pages).
 const searchFilter = async ({ location, guests, pets, checkin, checkout }) => {
     const filter = {};
     if (location) filter.address = { $regex: escapeRegex(location), $options: "i" };
@@ -64,6 +65,9 @@ const createPlacesRouter = ({ storage, limiters, auth }) => {
             Place.countDocuments(filter),
             Place.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit),
         ]);
+        // What people search for, and searches that find nothing (demand without supply).
+        const searched = Object.fromEntries(Object.entries(search).filter(([, v]) => v));
+        if (Object.keys(searched).length) req.log.log(total ? "debug" : "info", total ? "Search" : "Search found no stays", { search: searched, page, total });
         res.json({
             places: await Promise.all(docs.map(storage.withPhotoUrls)),
             page,
@@ -73,22 +77,11 @@ const createPlacesRouter = ({ storage, limiters, auth }) => {
         });
     });
 
-    // Search suggestions: each comma-separated address part with a stay count.
-    // Registered before "/:id" so "destinations" isn't read as an id.
+    // Search suggestions: each comma-separated address part with a stay count
+    // and its /stays/:slug page. Registered before "/:id" so "destinations"
+    // isn't read as an id.
     router.get("/destinations", async (req, res) => {
-        const groups = await Place.aggregate([{ $group: { _id: "$address", count: { $sum: 1 } } }]);
-        const counts = new Map();
-        for (const { _id: address, count } of groups) {
-            if (typeof address !== "string") continue;
-            for (const part of new Set(address.split(",").map((s) => s.trim()).filter(Boolean))) {
-                counts.set(part, (counts.get(part) || 0) + count);
-            }
-        }
-        res.json(
-            [...counts]
-                .map(([name, count]) => ({ name, count }))
-                .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
-        );
+        res.json(await listDestinations());
     });
 
     router.get("/:id", objectIdParam("id"), async (req, res) => {
@@ -100,20 +93,26 @@ const createPlacesRouter = ({ storage, limiters, auth }) => {
     router.post("/", auth, limiters.write, validate({ body: placeBody }), async (req, res) => {
         const body = req.valid.body;
         const place = await Place.create({ ...body, photos: storage.normalizePhotos(body.photos), owner: req.user.id });
+        req.log.info("Listing created", { placeId: String(place._id), userId: req.user.id, address: place.address, price: place.price, photos: place.photos.length });
         res.status(201).json(await storage.withPhotoUrls(place));
     });
 
     router.put("/:id", auth, objectIdParam("id"), validate({ body: placeBody }), async (req, res) => {
         const place = await Place.findById(req.params.id);
         if (!place) throw notFound("That place doesn't exist.");
-        if (String(place.owner) !== req.user.id) throw forbidden("You can only edit your own listings.");
+        if (String(place.owner) !== req.user.id) {
+            req.log.warn("Blocked an edit to someone else's listing", { placeId: req.params.id, userId: req.user.id, ownerId: String(place.owner) });
+            throw forbidden("You can only edit your own listings.");
+        }
         const body = req.valid.body;
         place.set({ ...body, photos: storage.normalizePhotos(body.photos) });
+        const changed = place.modifiedPaths().filter((path) => !path.includes("."));
         await place.save();
+        req.log.info("Listing updated", { placeId: req.params.id, userId: req.user.id, changed });
         res.json(await storage.withPhotoUrls(place));
     });
 
     return router;
 };
 
-module.exports = { createPlacesRouter, placeBody, listQuery };
+module.exports = { createPlacesRouter, placeBody, listQuery, searchFilter, PAGE_SIZE };

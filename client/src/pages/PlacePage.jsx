@@ -9,6 +9,8 @@ import { api, errorMessage } from '../lib/api'
 import { formatPrice, nightsBetween } from '../lib/format'
 import { dayString, readSearch, totalGuests } from '../lib/search'
 import { useFetch } from '../lib/useFetch'
+import { takeInitialData } from '../lib/initialData'
+import { addressParts, placeSeo, privateSeo, slugify, useSeo } from '../lib/seo'
 import { UserContext } from '../UserContext'
 
 // Airbnb-style reservation card. Prices shown here are estimates; the server
@@ -113,21 +115,46 @@ export const BookingWidget = ({ place }) => {
   );
 };
 
+// Kenya › Kwale › Diani Beach, linking to each destination page (the API
+// describes the same trail in the page's structured data).
+const Breadcrumbs = ({ address }) => {
+  const trail = addressParts(address).reverse().filter((part) => slugify(part));
+  if (trail.length === 0) return null;
+  return (
+    <nav aria-label="Breadcrumb" className="text-sm text-gray-600">
+      <ol className="flex flex-wrap items-center gap-1.5">
+        <li><Link to="/" className="hover:underline">Home</Link></li>
+        {trail.map((part) => (
+          <React.Fragment key={part}>
+            <li aria-hidden="true">›</li>
+            <li><Link to={`/stays/${slugify(part)}`} className="hover:underline">{part}</Link></li>
+          </React.Fragment>
+        ))}
+      </ol>
+    </nav>
+  );
+};
+
 const PlacePage = () => {
   const { id } = useParams();
-  const { data: place, loading, error, reload } = useFetch(`/places/${id}`);
+  // A server-rendered visit arrives with the place already loaded.
+  const [initial] = useState(() => takeInitialData('place', (place) => place?._id === id));
+  const { data: place, loading, error, reload } = useFetch(`/places/${id}`, undefined, { initialData: initial });
   const [tourIndex, setTourIndex] = useState(null); // photo tour open at this index
+  const missing = error?.response?.status === 404;
+  useSeo(place ? placeSeo(place) : missing ? privateSeo('Place not found') : null);
 
   if (loading) return <LoadingState label="Loading this place…" />;
   if (error) {
-    return error.response?.status === 404
+    return missing
       ? <ErrorState message="This place doesn’t exist or is no longer listed." />
       : <ErrorState message={errorMessage(error)} onRetry={reload} />;
   }
 
   return (
     <article className="mx-auto mt-6 max-w-6xl">
-      <h1 className="text-2xl font-semibold md:text-3xl">{place.title}</h1>
+      <Breadcrumbs address={place.address} />
+      <h1 className="mt-2 text-2xl font-semibold md:text-3xl">{place.title}</h1>
       <a
         title={`Search ${place.address} on Google Maps`}
         className="my-2 inline-flex items-center gap-2 font-semibold underline underline-offset-2"

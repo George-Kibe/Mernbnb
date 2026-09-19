@@ -93,7 +93,7 @@ const createPhotoStorage = ({ bucket, region, endpoint, accessKeyId, secretAcces
             // Without credentials we can't sign; a public URL still works if
             // the bucket allows public reads.
             if (!warnedAboutSigning) {
-                logger?.warn({ err: error }, "Could not sign photo URLs; serving unsigned URLs");
+                logger?.warn("Could not sign photo URLs; serving unsigned URLs, which only work if the bucket is public", { bucket, err: error });
                 warnedAboutSigning = true;
             }
             return publicUrl(key);

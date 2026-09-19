@@ -4,7 +4,7 @@ import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const { createDatabase } = require("../_src/db");
 
-const logger = { info: vi.fn() };
+const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 const fakeMongoose = (connect) => ({ connect, connection: { readyState: 1 }, disconnect: vi.fn().mockResolvedValue() });
 
 describe("createDatabase", () => {

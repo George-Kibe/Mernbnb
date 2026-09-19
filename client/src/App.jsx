@@ -10,14 +10,14 @@ import ErrorPage from './pages/ErrorPage'
 import IndexPage from "./pages/IndexPage"
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import PageNotFound from './pages/PageNotFound'
 import PlacePage from './pages/PlacePage'
-import ProfileLayout from './pages/ProfileLayout'
-import AccountPage from './pages/AccountPage'
-import BookingsPage from './pages/BookingsPage'
-import BookingPage from './pages/BookingPage'
-import MyPlacesPage from './pages/MyPlacesPage'
-import PlaceFormPage from './pages/PlaceFormPage'
+import StaysPage from './pages/StaysPage'
+
+// The signed-in area loads on demand, so guests and search engines download
+// less JavaScript.
+const lazyPage = (load) => async () => ({ Component: (await load()).default });
 
 export const routes = [
   {
@@ -27,20 +27,22 @@ export const routes = [
       { index: true, element: <IndexPage /> },
       { path: "login", element: <LoginPage /> },
       { path: "register", element: <RegisterPage /> },
+      { path: "forgot-password", element: <ForgotPasswordPage /> },
       { path: "place/:id", element: <PlacePage /> },
+      { path: "stays/:slug", element: <StaysPage /> },
       {
         element: <RequireAuth />,
         children: [
           {
             path: "profile",
-            element: <ProfileLayout />,
+            lazy: lazyPage(() => import('./pages/ProfileLayout')),
             children: [
-              { index: true, element: <AccountPage /> },
-              { path: "bookings", element: <BookingsPage /> },
-              { path: "bookings/:id", element: <BookingPage /> },
-              { path: "places", element: <MyPlacesPage /> },
-              { path: "places/new", element: <PlaceFormPage /> },
-              { path: "places/:id", element: <PlaceFormPage /> },
+              { index: true, lazy: lazyPage(() => import('./pages/AccountPage')) },
+              { path: "bookings", lazy: lazyPage(() => import('./pages/BookingsPage')) },
+              { path: "bookings/:id", lazy: lazyPage(() => import('./pages/BookingPage')) },
+              { path: "places", lazy: lazyPage(() => import('./pages/MyPlacesPage')) },
+              { path: "places/new", lazy: lazyPage(() => import('./pages/PlaceFormPage')) },
+              { path: "places/:id", lazy: lazyPage(() => import('./pages/PlaceFormPage')) },
             ],
           },
         ],

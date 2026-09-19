@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createRequire } from "module";
-import { Writable } from "stream";
 
 const require = createRequire(import.meta.url);
 const { loadConfig, ConfigError, DEV_JWT_SECRET } = require("../_src/config");
-const { createLogger, hasPrettyPrinter } = require("../_src/logger");
 
 const SECRET = "s".repeat(32);
 
@@ -13,8 +11,24 @@ describe("loadConfig", () => {
         const c = loadConfig({});
         expect(c).toMatchObject({ env: "development", isProduction: false, port: 5000, logLevel: "debug", trustProxy: 0, corsOrigins: ["http://localhost:5173"] });
         expect(c.jwt).toEqual({ secret: DEV_JWT_SECRET, expiresIn: "7d" });
-        expect(c.rateLimit).toEqual({ windowMs: 900000, max: 300, authMax: 10, writeMax: 30, uploadMax: 60 });
+        expect(c.rateLimit).toEqual({ windowMs: 900000, max: 300, authMax: 10, writeMax: 30, uploadMax: 60, pageMax: 600, resetMax: 10 });
+        expect(c.mail).toMatchObject({ transport: "log", port: 587, secure: false, from: '"AirBuenas" <no-reply@mernbnb.vercel.app>' });
+        expect(c.siteUrl).toBe("https://mernbnb.vercel.app");
         expect(c.s3).toMatchObject({ bucket: "mernbnb-images-bucket", region: "eu-west-1", endpoint: undefined });
+    });
+
+    it("takes the public site address without a trailing slash", () => {
+        expect(loadConfig({ SITE_URL: "https://stays.example.co.ke/" }).siteUrl).toBe("https://stays.example.co.ke");
+        expect(() => loadConfig({ SITE_URL: "ftp://example.com" })).toThrow(/SITE_URL/);
+        expect(() => loadConfig({ SITE_URL: "not a url" })).toThrow(ConfigError);
+    });
+
+    it("sends email over SMTP when it's configured, and never logs it in production", () => {
+        const smtp = loadConfig({ SMTP_HOST: "smtp.example.com", SMTP_PORT: "465", SMTP_USER: "u", SMTP_PASSWORD: "p", MAIL_FROM: "Stays <hi@example.com>" }).mail;
+        expect(smtp).toEqual({ transport: "smtp", host: "smtp.example.com", port: 465, secure: true, user: "u", password: "p", from: "Stays <hi@example.com>" });
+        expect(loadConfig({ SMTP_HOST: "h", SMTP_SECURE: "true" }).mail.secure).toBe(true);
+        expect(loadConfig({ NODE_ENV: "production", MONGO_URL: "m", JWT_SECRET: SECRET }).mail.transport).toBe("none");
+        expect(() => loadConfig({ SMTP_SECURE: "yes" })).toThrow(/SMTP_SECURE/);
     });
 
     it("is silent in tests", () => {
@@ -42,34 +56,5 @@ describe("loadConfig", () => {
     it("rejects invalid values with a readable message", () => {
         expect(() => loadConfig({ PORT: "abc" })).toThrow(/Invalid environment: PORT/);
         expect(() => loadConfig({ NODE_ENV: "staging" })).toThrow(/NODE_ENV/);
-    });
-});
-
-describe("createLogger", () => {
-    const capture = () => {
-        const lines = [];
-        const destination = new Writable({ write(chunk, enc, done) { lines.push(JSON.parse(chunk)); done(); } });
-        return { lines, destination };
-    };
-
-    it("writes JSON lines and redacts credentials", () => {
-        const { lines, destination } = capture();
-        const logger = createLogger({ env: "production", logLevel: "info" }, { destination });
-        logger.info({ req: { headers: { authorization: "Bearer abc", cookie: "sid=1" } }, body: { password: "hunter2" }, auth: { token: "t" } }, "hello");
-        expect(lines[0]).toMatchObject({ msg: "hello", service: "airbuenas-api", req: { headers: { authorization: "[redacted]", cookie: "[redacted]" } }, body: { password: "[redacted]" }, auth: { token: "[redacted]" } });
-    });
-
-    it("respects the level", () => {
-        const { lines, destination } = capture();
-        const logger = createLogger({ env: "production", logLevel: "warn" }, { destination });
-        logger.info("dropped");
-        logger.warn("kept");
-        expect(lines.map((l) => l.msg)).toEqual(["kept"]);
-    });
-
-    it("uses pino-pretty in development when available", () => {
-        expect(hasPrettyPrinter()).toBe(true);
-        expect(createLogger({ env: "development", logLevel: "silent" }).level).toBe("silent");
-        expect(createLogger({ env: "development", logLevel: "debug" }, { pretty: false }).level).toBe("debug");
     });
 });

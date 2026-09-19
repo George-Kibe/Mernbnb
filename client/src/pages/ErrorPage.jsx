@@ -1,10 +1,12 @@
 import React from 'react'
 import { Link, isRouteErrorResponse, useRouteError } from 'react-router'
+import { privateSeo, useSeo } from '../lib/seo'
 
 // Shown instead of a blank screen when a page crashes or a route fails.
 const ErrorPage = () => {
   const error = useRouteError();
   const notFound = isRouteErrorResponse(error) && error.status === 404;
+  useSeo(privateSeo(notFound ? 'Page not found' : 'Something went wrong'));
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
       <p className="text-6xl font-bold text-primary">{notFound ? '404' : 'Oops'}</p>

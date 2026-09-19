@@ -13,7 +13,9 @@ A full-stack vacation-rental marketplace inspired by Airbnb, built on the MERN s
   - **Account menu:** Trips, Manage listings, Create a new listing, Account, Log out.
 - **Listing page:** Airbnb-style photo grid, "Show all photos" tour and full-screen viewer, plus a reservation card with a live price breakdown. The server computes the real price and rejects double bookings.
 - **Hosting:** create and edit listings; drag and drop photos or add them from a link, reorder them and pick a cover photo. Photos go straight from the browser to S3 through presigned URLs.
+- **Destination pages:** `/stays/diani-beach`, `/stays/nairobi`, … list the stays in each town or county, linked from the footer and from listing breadcrumbs
 - **Themes:** light, dark and system themes, and corporate-blue branding
+- **SEO:** each listing and destination page has its own server-rendered title, description, canonical link, share preview and schema.org structured data. The API generates `sitemap.xml` and `robots.txt`, and unknown pages return a real 404. See [SEO](#seo).
 - **Security:** production-grade API with authentication and ownership checks, input validation, rate limiting, security headers and structured logging
 
 ## Tech stack
@@ -21,7 +23,7 @@ A full-stack vacation-rental marketplace inspired by Airbnb, built on the MERN s
 | Layer    | Technology |
 | -------- | ---------- |
 | Frontend | React 19.3, Vite 8, React Router 8, Tailwind CSS 4, axios, date-fns 4, react-hot-toast |
-| Backend  | Node.js, Express 5.2, Mongoose 9, zod, jsonwebtoken, bcryptjs, helmet, express-rate-limit, pino, AWS SDK v3 |
+| Backend  | Node.js, Express 5.2, Mongoose 9, zod, jsonwebtoken, bcryptjs, helmet, express-rate-limit, winston, AWS SDK v3 |
 | Storage  | MongoDB (e.g. Atlas) for data, AWS S3 for photos |
 | Testing  | Vitest, Testing Library, MSW, supertest, mongodb-memory-server, aws-sdk-client-mock (95% coverage enforced) |
 | Hosting  | Vercel (static client and the API as one serverless function); CI on GitHub Actions |
@@ -35,25 +37,28 @@ A full-stack vacation-rental marketplace inspired by Airbnb, built on the MERN s
 │   ├── _src/                 App code (underscore folders are not deployed as separate functions)
 │   │   ├── app.js            Middleware order and routers
 │   │   ├── config.js         Validated environment (fails fast in production)
-│   │   ├── logger.js         pino JSON logs + per-request logs with request IDs
+│   │   ├── logger.js         winston: JSON logs, request lines with request IDs, redaction
 │   │   ├── db.js             Cached MongoDB connection, 503 when unavailable
 │   │   ├── middleware/       auth (JWT), validate (zod), rateLimit, errors
-│   │   ├── routes/           users, places, bookings (+ /me), uploads
+│   │   ├── routes/           users, places, bookings (+ /me), uploads, photos
+│   │   ├── seo/              Server-rendered <head> for listing/destination pages, sitemap, robots.txt
 │   │   ├── models/           User, Place, Booking
-│   │   └── lib/              s3 (presigning, photo URLs), fetchImage (SSRF-safe download)
+│   │   └── lib/              s3 (presigning, photo URLs), fetchImage (SSRF-safe download), destinations
 │   ├── _scripts/             seed.js, configure-s3-cors.js
 │   └── _tests/               API tests (Vitest + supertest + in-memory MongoDB)
 ├── client/                   React SPA (ES modules, Vite)
-│   ├── public/               Favicons, theme-init.js (applies the theme before paint)
+│   ├── public/               Icons, share image, manifest, theme-init.js (theme before paint),
+│   │                         home-prefetch.js (starts loading the home page's listings early)
 │   └── src/
 │       ├── App.jsx           Route table (Layout, RequireAuth, error page)
 │       ├── UserContext.jsx   Session from the JWT; expiry and cross-tab sync
-│       ├── lib/              api client, useFetch, search, photos, theme, format
+│       ├── lib/              api client, useFetch, search, photos, theme, format, seo, images
 │       ├── components/       Header, Footer, search/, photos/, Pagination, …
-│       ├── pages/            Home, Place, Login/Register, profile pages, listing editor
+│       ├── pages/            Home, Stays (destinations), Place, Login/Register, profile pages, listing editor
 │       └── test/             Test setup (MSW), helpers
 ├── .github/workflows/ci.yml  Lint, test with coverage gates, build, audit
-└── vercel.json               Build, /api routing, app fallback, security headers
+├── vercel.json               Build, routing (static app, /api, server-rendered pages), security headers
+└── .vercelignore             Keeps tooling configs under api/ from becoming functions
 ```
 
 ## Getting started
@@ -80,7 +85,7 @@ cp api/.env.example api/.env
 | `S3_BUCKET`, `S3_REGION` | Default `mernbnb-images-bucket`, `eu-west-1` |
 | `CORS_ORIGINS` | Extra origins allowed to call the API cross-origin (comma-separated). Not needed when the client calls `/api` on its own domain. |
 | `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX`, … | Rate limits; see `.env.example` |
-| `LOG_LEVEL` | `info` in production, `debug` in development |
+| `LOG_LEVEL` | `info` in production, `debug` in development (`error`, `warn`, `info`, `http`, `verbose`, `debug`, `silent`) |
 
 Browsers upload photos directly to S3, so the bucket needs a CORS rule. Run this once per bucket:
 
@@ -152,7 +157,7 @@ All routes are under `/api`. Bodies are JSON. 🔒 means the route needs `Author
 | POST | `/users/login` | `{ email, password }` → `{ user, token }` |
 | GET | `/users/me` 🔒 | `{ user }` |
 | GET | `/places` | `?page&limit&location&guests&pets&checkin&checkout` → `{ places, page, limit, total, totalPages }`, newest first |
-| GET | `/places/destinations` | Search suggestions `[{ name, count }]` |
+| GET | `/places/destinations` | Destinations `[{ name, slug, count, minPrice }]`, for search suggestions and `/stays/:slug` pages |
 | GET | `/places/:id` | One place |
 | POST | `/places` 🔒 | Create a listing owned by you |
 | PUT | `/places/:id` 🔒 | Update your listing (`403` if it isn't yours) |
@@ -162,18 +167,35 @@ All routes are under `/api`. Bodies are JSON. 🔒 means the route needs `Author
 | GET | `/me/bookings` 🔒 | Your trips |
 | POST | `/uploads/presign` 🔒 | `{ files: [{ type, size }] }` → presigned S3 PUT URLs (JPEG/PNG/WebP/AVIF/GIF, ≤ 10 MB, ≤ 20 per request) |
 | POST | `/uploads/by-link` 🔒 | `{ link }`: the server downloads the image (private addresses blocked) → `{ key, url }` |
+| GET | `/photos/<key>` | `302` to a fresh signed URL for a listing photo: a stable, public address for search engines and share previews |
+
+The API also serves these pages, outside `/api` (see [SEO](#seo)):
+
+| Path | Purpose |
+| ---- | ------- |
+| `/place/:id` | The app, with the listing's title, description, canonical link, share image, structured data and data already filled in. `404` for unknown listings. |
+| `/stays/:slug` | The same for a destination page (`?page=2`, …). `301` to the lowercase slug; `404` for unknown destinations. |
+| `/sitemap.xml` | The home page, every destination and every listing (with photos) |
+| `/robots.txt` | Crawl rules and the sitemap's address |
+| any other unknown path | The app's "page not found" screen with a real `404` status |
 
 **Rate limits** (defaults, configurable):
 - 300 requests per 15 minutes per IP;
 - 10 failed logins or registrations per 15 minutes per IP;
 - 30 new listings or bookings per hour per user;
-- 60 upload requests per hour per user.
+- 60 upload requests per hour per user;
+- 600 server-rendered pages (and sitemap, `robots.txt`, photo links) per 15 minutes per IP.
 
 **Photos** are returned as signed S3 URLs. Send them back unchanged when updating a listing; the server stores the S3 keys.
 
 ## Deployment (Vercel)
 
-`vercel.json` builds the client (`npm ci && npm run build`), routes `/api/*` to `api/index.js`, serves the app for every other path (so shared links like `/place/…` work), and adds security headers (CSP, `nosniff`, no framing, referrer policy) plus long-lived caching for hashed assets.
+`vercel.json` builds the client (`npm ci && npm run build`) and routes requests:
+- static files (the home page, `/assets/*`, icons) are served directly;
+- `/login`, `/register` and `/profile/*` get the app's `index.html`;
+- `/api/*` and everything else go to the API function (`api/index.js`), which server-renders listing and destination pages, generates the sitemap and `robots.txt`, and returns `404`s. It bundles `client/dist/index.html` as its page template (`includeFiles`).
+
+It also adds security headers (CSP, `nosniff`, no framing, referrer policy) and long-lived caching for hashed assets. Server-rendered pages are cached by Vercel's CDN for 5 minutes (`s-maxage`).
 
 In the Vercel project settings, set:
 
@@ -181,8 +203,52 @@ In the Vercel project settings, set:
 - `S3_ACCESS_KEY`, `S3_SECRET_ACCESS_KEY`, and `S3_BUCKET` / `S3_REGION` if they aren't the defaults.
 - Node.js version **24.x**.
 - Leave `VITE_API_BASE_URL` unset; the client calls `/api` on whichever domain serves it.
+- On a custom domain, set **`SITE_URL`** (API) and **`VITE_SITE_URL`** (client build) to it, e.g. `https://airbuenas.co.ke`. Both default to `https://mernbnb.vercel.app`; canonical links, the sitemap and share previews use them.
 
 Also run `npm run s3:cors` with your production domain included.
+
+## SEO
+
+Search engines and link previews (WhatsApp, Facebook, X, Slack) get real content without running JavaScript:
+
+- **Server-rendered `<head>`:** `/place/:id` and `/stays/:slug` go through the API (`api/_src/seo`), which fills in the marked block in `client/index.html` (`<!--seo:start-->` … `<!--seo:end-->`). Each page gets its own title, meta description, canonical link, Open Graph and Twitter tags, and JSON-LD: `LodgingBusiness` plus `BreadcrumbList` for listings, `CollectionPage` with an `ItemList` for destinations. The page's data goes along too, so the app renders without a second request.
+- **In the app:** `src/lib/seo.js` keeps the head in step as people navigate, using the same formulas as the API. Search results, account pages and errors are `noindex`; pages 2+ have their own canonical link.
+- **Crawling:** `sitemap.xml` lists the home page, every destination and every listing with its photos. `robots.txt` keeps crawlers out of `/profile` and the private API but leaves `/api/places` open, because pages need it to render. Unknown pages return a real `404` instead of a "soft 404".
+- **Speed (Core Web Vitals):** photos come in responsive sizes (`srcset`), the main image loads first (`fetchpriority`, and a server-side preload on listing pages), card photos after the first load only when someone swipes or hovers, the home page's listings start loading before the app's JavaScript, and the signed-in area loads on demand.
+- **Share image:** `client/public/og-image.png` (1200×630) for pages without their own photo.
+
+### After deploying
+
+1. **Google Search Console:** add the site (a domain property if you have a custom domain), verify it, submit `https://<your domain>/sitemap.xml`, and use URL Inspection on a listing to check that Google sees the rendered page.
+2. **Bing Webmaster Tools:** import the site from Search Console.
+3. **Check** a listing in the [Rich Results Test](https://search.google.com/test/rich-results) and a share preview in the [Facebook Sharing Debugger](https://developers.facebook.com/tools/debug/).
+4. **One address per page:** `kibe-mernbnb.vercel.app` serves the same site. The canonical links point to `SITE_URL`, but for a clean signal redirect the other domains to it (Vercel → Project → Settings → Domains → Redirect).
+
+## Logs
+
+The API logs with [winston](https://github.com/winstonjs/winston): one JSON object per line in production (Vercel → Project → Logs, or `vercel logs <deployment>`), and readable, coloured lines in development.
+
+**Every request** gets one line, e.g. `POST /api/users/login 401 in 74.3 ms`, with the method, URL, status, duration, IP, user agent, the user's ID when logged in, and for `4xx`/`5xx` the reason (`"error": "Incorrect email or password."`). Each line carries a `requestId`, which is also in the `X-Request-Id` response header and in every error response. Search the logs for it to see everything that happened in that request. Health checks aren't logged.
+
+**Events**, tagged with the same `requestId`:
+
+| Area | Logged |
+| ---- | ------ |
+| Startup | `API starting` with the settings in effect (never secrets), once per start or Vercel cold start |
+| Database | Connecting, connected (with the time it took), connection failed, disconnected, reconnected |
+| Accounts | Account created, logged in (user ID); login failed (masked email such as `a***@example.com`, and whether the account exists); registration refused |
+| Sessions | Session expired (info); invalid or tampered token (warn) |
+| Listings | Created; updated, with the fields that changed; blocked edits of someone else's listing |
+| Bookings | Created (dates, nights, guests, total); refused because the dates are taken; blocked access to someone else's booking |
+| Photos | Upload URLs issued (count, bytes); photo added from a link (host); refused links, including private addresses (possible SSRF attempts); missing S3 credentials, with the fix |
+| Abuse | Rate limit reached (which limit, IP or user); a cross-origin request from a site not in `CORS_ORIGINS` |
+| Search | Searches that found nothing (at `info`: demand you can't serve yet); all searches at `debug` |
+| Pages | Where the page template came from; page, template and sitemap failures |
+| Errors | Every `5xx` with its stack trace; unhandled rejections and exceptions |
+
+Never logged: passwords, tokens, cookies, `Authorization` headers, secrets or keys (redacted at any depth, by field name), full email addresses, phone numbers, or request bodies.
+
+**Useful searches:** `"level":"error"`; `Login failed` repeated for one masked email (credential stuffing); `Rate limit reached` for one IP; `Image link refused`; `Search found no stays` (where to recruit hosts).
 
 ## Troubleshooting
 

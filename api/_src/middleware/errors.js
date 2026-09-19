@@ -25,7 +25,10 @@ const errorHandler = (err, req, res, next) => {
         message = details[0]?.message ?? "Invalid data.";
     }
 
-    if (status >= 500) req.log.error({ err }, "Request failed");
+    // The request log line (logger.js) reports this message and the fields
+    // that failed validation, so a 4xx says why without another log line.
+    res.locals.error = details?.length ? `${message} (${details.map((d) => d.field).join(", ")})` : message;
+    if (status >= 500) req.log.error("Request failed", { err, status });
     res.status(status).json({ error: message, ...(details && { details }), requestId: req.id });
 };
 

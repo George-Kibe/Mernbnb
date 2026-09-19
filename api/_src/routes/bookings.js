@@ -52,8 +52,12 @@ const createBookingsRouter = ({ storage, limiters, auth, now = Date.now }) => {
         if (String(place.owner) === req.user.id) throw badRequest("You can't book your own place.");
         if (guests > place.maxGuests) throw badRequest(`This place fits at most ${place.maxGuests} guests.`);
 
+        const dates = { checkIn: req.valid.body.checkIn, checkOut: req.valid.body.checkOut };
         const taken = await Booking.exists({ place: place._id, checkIn: { $lt: checkOut }, checkOut: { $gt: checkIn } });
-        if (taken) throw conflict("Those dates are no longer available. Please pick different dates.");
+        if (taken) {
+            req.log.info("Booking refused: dates already booked", { placeId, userId: req.user.id, ...dates });
+            throw conflict("Those dates are no longer available. Please pick different dates.");
+        }
 
         const booking = await Booking.create({
             place: place._id,
@@ -66,6 +70,16 @@ const createBookingsRouter = ({ storage, limiters, auth, now = Date.now }) => {
             email: req.user.email,
             price: nights * place.price,
         });
+        req.log.info("Booking created", {
+            bookingId: String(booking._id),
+            placeId,
+            userId: req.user.id,
+            hostId: String(place.owner),
+            ...dates,
+            nights,
+            guests,
+            total: booking.price,
+        });
         res.status(201).json(booking);
     });
 
@@ -74,7 +88,11 @@ const createBookingsRouter = ({ storage, limiters, auth, now = Date.now }) => {
         const booking = await Booking.findById(req.params.id).populate("place");
         const isGuest = booking && String(booking.owner) === req.user.id;
         const isHost = booking?.place && String(booking.place.owner) === req.user.id;
-        if (!isGuest && !isHost) throw notFound("Booking not found.");
+        if (!isGuest && !isHost) {
+            // Someone else's booking: answered like a missing one, but worth knowing about.
+            if (booking) req.log.warn("Blocked access to someone else's booking", { bookingId: req.params.id, userId: req.user.id });
+            throw notFound("Booking not found.");
+        }
         res.json(await withPlacePhotos(storage)(booking));
     });
 

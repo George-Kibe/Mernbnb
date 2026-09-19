@@ -62,7 +62,7 @@ const Footer = () => {
           <ul className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-6">
             {destinations.map((destination) => (
               <li key={destination.name}>
-                <Link to={`/?location=${encodeURIComponent(destination.name)}`} className="group block">
+                <Link to={`/stays/${destination.slug}`} className="group block">
                   <span className="block truncate text-sm font-semibold group-hover:underline">{destination.name}</span>
                   <span className="block text-sm text-gray-500">
                     {destination.count} {destination.count === 1 ? 'stay' : 'stays'}

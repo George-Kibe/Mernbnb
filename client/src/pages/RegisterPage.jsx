@@ -3,11 +3,13 @@ import { Link, Navigate } from 'react-router'
 import toast from 'react-hot-toast'
 import { api, errorMessage } from '../lib/api'
 import { UserContext } from '../UserContext'
+import { privateSeo, useSeo } from '../lib/seo'
 
 const MIN_PASSWORD = 8;
 
 const RegisterPage = () => {
   const { user, login } = useContext(UserContext);
+  useSeo(privateSeo('Sign up'));
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

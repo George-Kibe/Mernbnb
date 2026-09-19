@@ -91,14 +91,19 @@ describe("GET /api/places", () => {
 describe("GET /api/places/destinations", () => {
     it("counts each address part, most popular first", async () => {
         const { user } = await h.createUser();
-        await h.createPlace(user, { address: "Diani Beach, Kwale" });
-        await h.createPlace(user, { address: "Tiwi Beach, Kwale" });
+        await h.createPlace(user, { address: "Diani Beach, Kwale", price: 9000 });
+        await h.createPlace(user, { address: "Tiwi Beach, Kwale", price: 7000 });
         await h.createPlace(user, { address: "Karen, Nairobi" });
+        await h.createPlace(user, { address: "Mũrang'a, !!!" }); // "!!!" has no slug
         await h.Place.collection.insertOne({ owner: user._id, title: "legacy", maxGuests: 1, price: 1 }); // no address
         const { body } = await request(app).get("/api/places/destinations").expect(200);
-        expect(body[0]).toEqual({ name: "Kwale", count: 2 });
-        expect(body).toEqual(expect.arrayContaining([{ name: "Diani Beach", count: 1 }, { name: "Karen", count: 1 }]));
-        expect(body.find((d) => d.name === "legacy")).toBeUndefined();
+        expect(body[0]).toEqual({ name: "Kwale", slug: "kwale", count: 2, minPrice: 7000 });
+        expect(body).toEqual(expect.arrayContaining([
+            { name: "Diani Beach", slug: "diani-beach", count: 1, minPrice: 9000 },
+            { name: "Karen", slug: "karen", count: 1, minPrice: 5000 },
+        ]));
+        expect(body).toContainEqual({ name: "Mũrang'a", slug: "murang-a", count: 1, minPrice: 5000 });
+        expect(body.find((d) => d.name === "legacy" || d.name === "!!!")).toBeUndefined();
     });
 });
 

@@ -102,16 +102,18 @@ describe("errors", () => {
     });
 
     it("turns Mongoose validation errors into 400s", () => {
-        const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+        const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), locals: {} };
         const err = { name: "ValidationError", errors: { price: { path: "price", message: "Price too high" } } };
         errorHandler(err, { id: "r1", log: { error: vi.fn() } }, res, () => {});
         expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.locals.error).toBe("Price too high (price)"); // for the request log line
         expect(res.json).toHaveBeenCalledWith({ error: "Price too high", details: [{ field: "price", message: "Price too high" }], requestId: "r1" });
     });
 
     it("falls back to a generic message for empty Mongoose validation errors", () => {
-        const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+        const res = { status: vi.fn().mockReturnThis(), json: vi.fn(), locals: {} };
         errorHandler({ name: "ValidationError", errors: {} }, { id: "r2", log: { error: vi.fn() } }, res, () => {});
+        expect(res.locals.error).toBe("Invalid data.");
         expect(res.json).toHaveBeenCalledWith({ error: "Invalid data.", details: [], requestId: "r2" });
     });
 });

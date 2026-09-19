@@ -16,13 +16,26 @@ const requireAuth = ({ secret }) => (req, res, next) => {
     try {
         const payload = jwt.verify(token, secret, { algorithms: ["HS256"] });
         const id = payload.sub ?? payload.id;
-        if (!id) return next(unauthorized("Your session is invalid. Please log in again."));
+        // Tokens made for something else (e.g. a password reset) aren't sessions.
+        if (payload.purpose) {
+            req.log.warn("Rejected a token that isn't a session token", { purpose: payload.purpose });
+            return next(unauthorized("Your session is invalid. Please log in again."));
+        }
+        if (!id) {
+            req.log.warn("Rejected a token without a user id");
+            return next(unauthorized("Your session is invalid. Please log in again."));
+        }
         req.user = { id: String(id), name: payload.name, email: payload.email };
         next();
     } catch (error) {
-        next(unauthorized(error.name === "TokenExpiredError"
-            ? "Your session has expired. Please log in again."
-            : "Your session is invalid. Please log in again."));
+        if (error.name === "TokenExpiredError") {
+            req.log.info("Session expired", { expiredAt: error.expiredAt });
+            return next(unauthorized("Your session has expired. Please log in again."));
+        }
+        // A bad signature or a malformed token: tampering, or a token signed
+        // with an old JWT_SECRET.
+        req.log.warn("Rejected an invalid token", { reason: error.message });
+        next(unauthorized("Your session is invalid. Please log in again."));
     }
 };
 

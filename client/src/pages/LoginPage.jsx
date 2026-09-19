@@ -3,12 +3,14 @@ import { Link, Navigate, useLocation } from 'react-router'
 import toast from 'react-hot-toast'
 import { api, errorMessage } from '../lib/api'
 import { UserContext } from '../UserContext'
+import { privateSeo, useSeo } from '../lib/seo'
 
 // Only redirect back to paths inside this app.
 const safeRedirect = (path) => (typeof path === 'string' && path.startsWith('/') && !path.startsWith('//') ? path : '/');
 
 const LoginPage = () => {
   const { user, login } = useContext(UserContext);
+  useSeo(privateSeo('Log in'));
   const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,7 +45,10 @@ const LoginPage = () => {
             <input id="login-email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
           </div>
           <div>
-            <label htmlFor="login-password" className="text-sm font-semibold">Password</label>
+            <div className="flex items-baseline justify-between">
+              <label htmlFor="login-password" className="text-sm font-semibold">Password</label>
+              <Link to="/forgot-password" state={{ email }} className="text-sm font-semibold text-gray-900 underline">Forgot password?</Link>
+            </div>
             <input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" />
           </div>
           {error && <p role="alert" className="text-sm font-semibold text-red-600 dark:text-red-400">{error}</p>}

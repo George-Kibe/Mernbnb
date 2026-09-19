@@ -6,7 +6,7 @@
 
 The app was not production-ready. Anyone could edit any listing, read anyone's bookings, forge login tokens (the signing secret was in the public repo), and fetch internal URLs through the server. Shared links to listings returned 404, and there were no tests, rate limits or logs.
 
-Everything that can be fixed in code has been fixed and covered by tests (API 164 tests, client 115 tests, coverage above 95% on every metric, enforced in CI). Three things still need a person with account access, listed under [Action required before deploying](#action-required-before-deploying). **Deploying without setting `JWT_SECRET` will take the API down.**
+Everything that can be fixed in code has been fixed and covered by tests (API 197 tests, client 141 tests, coverage above 95% on every metric, enforced in CI). Things that still need a person with account access are listed under [Action required](#action-required). A follow-up [SEO pass](#seo) (September 2026) made listing and destination pages indexable and shareable.
 
 ## Findings
 
@@ -47,10 +47,10 @@ Severity: **Critical** means it's exploitable now with serious impact; **High** 
 
 | # | Severity | Finding | Resolution |
 | - | -------- | ------- | ---------- |
-| O1 | High | **No logging** beyond `console.log`. | pino JSON logs, one line per request: method, path, status, duration and a request ID (echoed as `X-Request-Id`). 4xx at `warn`, 5xx at `error`; auth headers, cookies, passwords and tokens are redacted. |
-| O2 | High | **No tests or CI.** | 279 tests, coverage gates at 95% on lines, statements, functions and branches. GitHub Actions runs lint, tests, build and `npm audit` on every push and PR. |
+| O1 | High | **No logging** beyond `console.log`. | winston JSON logs. One line per request: method, path, status, duration, user and, for 4xx/5xx, the reason, with a request ID (echoed as `X-Request-Id`); 4xx at `warn`, 5xx at `error` with stack traces. Events for startup settings, database connections, sign-ups and logins (masked emails), failed and tampered sessions, listing and booking changes, blocked access, uploads and refused links, rate limits and CORS rejections. Credentials, tokens, secrets, phone numbers and request bodies are never logged. See the README's *Logs* section. |
+| O2 | High | **No tests or CI.** | 338 tests, coverage gates at 95% on lines, statements, functions and branches. GitHub Actions runs lint, tests, build and `npm audit` on every push and PR. |
 | O3 | Medium | **Configuration unvalidated;** secrets optional. | zod-validated config; production fails fast with a clear message. |
-| O4 | Medium | **Vercel would create one function per `.js` file** under `api/` (Hobby plan limit: 12). | Code moved to `_src/`, `_scripts/` and `_tests/`, which Vercel ignores; one function remains. |
+| O4 | Medium | **Vercel would create one function per `.js` file** under `api/` (Hobby plan limit: 12). The ESLint and Vitest configs (`.mjs`) were deployed as functions too. | Code moved to `_src/`, `_scripts/` and `_tests/`, which Vercel ignores; `.vercelignore` drops the configs. One function remains (checked with `vercel build`). |
 | O5 | Low | **Non-reproducible builds** (`npm install`). | `npm ci` in the Vercel build and in CI. |
 
 ## Verification
@@ -59,8 +59,8 @@ Severity: **Critical** means it's exploitable now with serious impact; **High** 
 
 | Package | Tests | Statements | Branches | Functions | Lines |
 | ------- | ----- | ---------- | -------- | --------- | ----- |
-| API | 164 | 99.2% | 98.6% | 98.2% | 99.5% |
-| Client | 115 | 99.4% | 97.2% | 99.1% | 99.8% |
+| API | 197 | 99.4% | 98.8% | 98.8% | 99.6% |
+| Client | 141 | 99.4% | 97.0% | 99.0% | 99.8% |
 
 **End to end:** a browser run against the API in production mode, with an in-memory MongoDB and an emulated S3, passed these checks:
 - sign-up with automatic login;
@@ -73,14 +73,35 @@ Severity: **Critical** means it's exploitable now with serious impact; **High** 
 
 **Other checks:** ESLint is clean in both packages, and `npm audit` reports 0 vulnerabilities in both.
 
-## Action required before deploying
+## Action required
 
-1. **Set `JWT_SECRET` in Vercel** (Production and Preview) to 32+ random characters:
+1. ~~**Set `JWT_SECRET` in Vercel**~~ Done on 19 September 2026 (Production and Preview). The deploy before it went down with a `ConfigError` until the secret was set. If you ever rotate it, use 32+ random characters:
    `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
-   Without it the API refuses to start. Everyone is logged out once, which is intended: the old secret is public.
 2. **Rotate the AWS keys** (S3): delete every key ever committed, create a new one, and update `api/.env` and Vercel. Then detach `AWSCompromisedKeyQuarantineV2` and check CloudTrail. Until then, photo previews stay broken and the leaked key can still upload.
 3. **Deploy the API and client together.** The API contract changed (auth headers, `/me/*` routes, booking body), so an old client won't work with the new API or vice versa.
 4. Re-run `npm run s3:cors` if you serve the app from any other domain.
+
+## SEO
+
+**Before:** every URL returned the same HTML: the title "AirBuenas", one generic description, no canonical link, no share tags, no structured data, and 9 characters of visible text until the app loaded. `/robots.txt` and `/sitemap.xml` returned the app's HTML, and missing listings returned `200` (soft 404s). Lighthouse on the live site: SEO 92, with `robots.txt` invalid.
+
+| # | Finding | Resolution |
+| - | ------- | ---------- |
+| SEO1 | Identical `<head>` on every page; link previews showed nothing about the listing. | The API renders listing (`/place/:id`) and destination (`/stays/:slug`) pages: unique title and description, canonical link, Open Graph and Twitter tags with a stable photo URL, and JSON-LD (`LodgingBusiness`, `BreadcrumbList`, `CollectionPage`/`ItemList`). The home page has static defaults, `WebSite`/`Organization` data and a 1200×630 share image. The app updates the head on navigation using the same formulas. |
+| SEO2 | No `robots.txt` or sitemap. | Generated from the database: `sitemap.xml` (home, destinations, listings with image entries), and `robots.txt` pointing to it. |
+| SEO3 | Soft 404s. | Unknown listings, destinations and paths return `404` with `noindex`; the app still shows its 404 screen. |
+| SEO4 | No landing pages to rank for "vacation rentals in <place>". | `/stays/:slug` destination pages with an H1, stay count and prices, linked from the footer and listing breadcrumbs. The home page gets an H1 and an intro. |
+| SEO5 | Search results, login and account pages were indexable. | `noindex` on search results, login, sign-up, account pages and errors; `/profile` disallowed in `robots.txt`. |
+| SEO6 | Slow largest paint: full-size photos everywhere, two photos per card, and listing pages that fetched their data only after the JavaScript ran. | Responsive `srcset`s; only the first photo per card until someone engages; the main image preloaded and prioritized; listing data embedded in the HTML; home listings requested early (`public/home-prefetch.js`); the signed-in area code-split. |
+
+**Result** (Lighthouse, mobile, same machine and data):
+
+| Page | Performance | SEO | LCP | CLS | Page weight |
+| ---- | ----------- | --- | --- | --- | ----------- |
+| Home, before → after | 80 → 90 | 92 → 100 | 5.0 s → 3.4 s | 0 → 0 | 2.16 MB → 0.81 MB |
+| Listing, before → after | 61 → 95 | 92 → 100 | 4.5 s → 2.7 s | 0.56 → 0 | 694 KB → 443 KB |
+
+**What code can't do** (see the README's *SEO → After deploying*): verify the site in Google Search Console and submit the sitemap; use a custom domain, and redirect `kibe-mernbnb.vercel.app` to it; earn links from Kenyan travel sites, blogs and directories; create a Google Business Profile if there's a physical office; and add real reviews and more listings with unique, detailed descriptions. Ranking depends mostly on those, and no site can be guaranteed the first position.
 
 ## Remaining risks and recommendations
 
@@ -96,3 +117,5 @@ In rough priority order:
 8. **CSP allows `'unsafe-inline'` styles,** needed by the toast library and inline style attributes. That's low risk, but could be tightened.
 9. **Pagination uses `skip`,** which slows at very high page numbers. Consider cursor pagination if listings grow into the tens of thousands.
 10. **E2E tests aren't in CI yet.** The browser flow above was run manually; consider Playwright in CI.
+11. **Listing photos on S3 can't be indexed while the AWS key is quarantined** (see *Action required*): `/api/photos/*` redirects to signed URLs that S3 currently refuses. The demo listings (Unsplash) are unaffected.
+12. **Reviews and ratings** would unlock star ratings in search results (`AggregateRating`), which usually lift click-through; the app has no reviews yet.
