@@ -70,6 +70,28 @@ const createBookingsRouter = ({ storage, limiters, auth, now = Date.now }) => {
             email: req.user.email,
             price: nights * place.price,
         });
+
+        // Two guests can pass the check above at the same moment, so the
+        // booking is written first and checked after: whoever got there first
+        // (ObjectIds are time-ordered) keeps the dates, and the other backs
+        // out. That needs no transaction, so it works on any MongoDB.
+        const clash = await Booking.exists({
+            place: place._id,
+            _id: { $lt: booking._id },
+            checkIn: { $lt: checkOut },
+            checkOut: { $gt: checkIn },
+        });
+        if (clash) {
+            await booking.deleteOne();
+            req.log.warn("Booking withdrawn: someone booked the same dates at the same moment", {
+                placeId,
+                userId: req.user.id,
+                ...dates,
+                keptBookingId: String(clash._id),
+            });
+            throw conflict("Those dates are no longer available. Please pick different dates.");
+        }
+
         req.log.info("Booking created", {
             bookingId: String(booking._id),
             placeId,

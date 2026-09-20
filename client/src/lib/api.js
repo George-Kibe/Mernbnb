@@ -22,9 +22,12 @@ api.interceptors.request.use((config) => {
 });
 
 // A 401 on an authenticated request means the session is no longer valid.
+// The server says why (expired, or ended by a password change), and that
+// reason is passed on so the app can show it.
 api.interceptors.response.use(undefined, (error) => {
   if (error.response?.status === 401 && error.config?.headers?.Authorization) {
-    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    const reason = error.response.data?.error;
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: { reason: typeof reason === "string" ? reason : undefined } }));
   }
   return Promise.reject(error);
 });

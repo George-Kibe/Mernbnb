@@ -35,6 +35,8 @@ const schema = z.object({
     UPLOAD_RATE_LIMIT_MAX: positiveInt(60),
     PAGE_RATE_LIMIT_MAX: positiveInt(600),
     RESET_RATE_LIMIT_MAX: positiveInt(10),
+    // "mongo" shares the counts between serverless instances; "memory" counts per instance.
+    RATE_LIMIT_STORE: z.enum(["mongo", "memory"]).optional(),
     // Email (password reset codes), over SMTP.
     SMTP_HOST: optionalString,
     SMTP_PORT: positiveInt(587),
@@ -87,6 +89,7 @@ const loadConfig = (env = process.env) => {
             uploadMax: e.UPLOAD_RATE_LIMIT_MAX,
             pageMax: e.PAGE_RATE_LIMIT_MAX,
             resetMax: e.RESET_RATE_LIMIT_MAX,
+            store: e.RATE_LIMIT_STORE ?? (production ? "mongo" : "memory"),
         },
         // Without SMTP_HOST, development prints emails to the log and
         // production can't send them (password reset is then unavailable).

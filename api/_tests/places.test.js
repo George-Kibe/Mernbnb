@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, inject } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, inject, vi } from "vitest";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
@@ -177,5 +177,84 @@ describe("PUT /api/places/:id", () => {
         await request(app).put("/api/places/000000000000000000000000").set("Authorization", auth).send(h.placeFields()).expect(404);
         const place = await h.createPlace(user);
         await request(app).put(`/api/places/${place._id}`).set("Authorization", auth).send({ title: "Only a title" }).expect(400);
+    });
+});
+
+describe("DELETE /api/places/:id", () => {
+    const TODAY = Date.parse("2030-06-15T09:00:00Z");
+    let app2;
+    let deletePhotos;
+    beforeAll(() => {
+        deletePhotos = vi.fn().mockResolvedValue(2);
+        const storage = { ...h.testStorage(), deletePhotos };
+        ({ app: app2 } = h.makeApp({ db, storage, now: () => TODAY }));
+    });
+
+    const listing = async () => {
+        const host = await h.createUser();
+        const place = await h.createPlace(host.user, { photos: ["places/a/1.jpg", "places/a/2.jpg"] });
+        return { host, place };
+    };
+
+    it("deletes your own listing and its photos", async () => {
+        const { host, place } = await listing();
+        await request(app2).delete(`/api/places/${place._id}`).set("Authorization", host.auth).expect(204);
+        expect(await h.Place.findById(place._id)).toBeNull();
+        expect(deletePhotos).toHaveBeenCalledWith(["places/a/1.jpg", "places/a/2.jpg"]);
+        await request(app2).get(`/api/places/${place._id}`).expect(404);
+    });
+
+    it("refuses someone else's listing, and unknown ids", async () => {
+        const { place } = await listing();
+        const other = await h.createUser();
+        const res = await request(app2).delete(`/api/places/${place._id}`).set("Authorization", other.auth).expect(403);
+        expect(res.body.error).toBe("You can only delete your own listings.");
+        await request(app2).delete(`/api/places/${place._id}`).expect(401);
+        await request(app2).delete("/api/places/000000000000000000000000").set("Authorization", other.auth).expect(404);
+        expect(await h.Place.findById(place._id)).not.toBeNull();
+    });
+
+    it("keeps listings that guests are still booked into", async () => {
+        const { host, place } = await listing();
+        const guest = await h.createUser();
+        const booking = await h.createBooking(place, guest.user, { checkIn: new Date("2030-06-20T00:00:00Z"), checkOut: new Date("2030-06-23T00:00:00Z") });
+        const res = await request(app2).delete(`/api/places/${place._id}`).set("Authorization", host.auth).expect(409);
+        expect(res.body.error).toMatch(/upcoming bookings/);
+        expect(await h.Place.findById(place._id)).not.toBeNull();
+
+        // Once the stay is over, it can go.
+        await h.Booking.updateOne({ _id: booking._id }, { $set: { checkIn: new Date("2030-06-01T00:00:00Z"), checkOut: new Date("2030-06-04T00:00:00Z") } });
+        await request(app2).delete(`/api/places/${place._id}`).set("Authorization", host.auth).expect(204);
+    });
+
+    it("still deletes the listing when the bucket can't be reached", async () => {
+        const { host, place } = await listing();
+        deletePhotos.mockRejectedValueOnce(new Error("S3 down"));
+        const logs = h.captureLogger();
+        const { app: noisy } = h.makeApp({ db, storage: { ...h.testStorage(), deletePhotos }, logger: logs.logger, now: () => TODAY });
+        await request(noisy).delete(`/api/places/${place._id}`).set("Authorization", host.auth).expect(204);
+        expect(await h.Place.findById(place._id)).toBeNull();
+        expect(logs.find("Could not delete unused photos from the bucket")).toMatchObject({ level: "error", photos: 2 });
+    });
+});
+
+describe("photos no longer used", () => {
+    it("are deleted from the bucket when a listing is edited", async () => {
+        const deletePhotos = vi.fn().mockResolvedValue(1);
+        const { app: app2 } = h.makeApp({ db, storage: { ...h.testStorage(), deletePhotos } });
+        const host = await h.createUser();
+        const place = await h.createPlace(host.user, { photos: ["places/a/old.jpg", "places/a/kept.jpg"] });
+        const body = { ...h.placeFields(), photos: ["places/a/kept.jpg", "places/a/new.jpg"] };
+        await request(app2).put(`/api/places/${place._id}`).set("Authorization", host.auth).send(body).expect(200);
+        expect(deletePhotos).toHaveBeenCalledWith(["places/a/old.jpg"]);
+    });
+
+    it("are left alone when the photos didn't change", async () => {
+        const deletePhotos = vi.fn();
+        const { app: app2 } = h.makeApp({ db, storage: { ...h.testStorage(), deletePhotos } });
+        const host = await h.createUser();
+        const place = await h.createPlace(host.user, { photos: ["places/a/kept.jpg"] });
+        await request(app2).put(`/api/places/${place._id}`).set("Authorization", host.auth).send({ ...h.placeFields(), photos: ["places/a/kept.jpg"], price: 7000 }).expect(200);
+        expect(deletePhotos).not.toHaveBeenCalled();
     });
 });

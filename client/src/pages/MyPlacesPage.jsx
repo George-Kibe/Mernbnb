@@ -1,9 +1,49 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Link } from 'react-router'
+import toast from 'react-hot-toast'
 import { EmptyState, ErrorState, LoadingState } from '../components/Status'
-import { errorMessage } from '../lib/api'
+import { api, errorMessage } from '../lib/api'
 import { formatPrice } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
+
+// Delete asks first, in place: no dialog to dismiss, and the listing is only
+// gone once "Delete listing" is pressed.
+const DeleteListing = ({ place, onDeleted }) => {
+  const [asking, setAsking] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/places/${place._id}`);
+      toast.success(`“${place.title}” was deleted.`);
+      onDeleted();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not delete this listing.'));
+      setDeleting(false);
+      setAsking(false);
+    }
+  };
+
+  if (!asking) {
+    return (
+      <button type="button" onClick={() => setAsking(true)} className="self-start rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-semibold hover:bg-gray-200">
+        Delete
+      </button>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="font-semibold">Delete this listing?</span>
+      <button type="button" onClick={remove} disabled={deleting} className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-on-primary hover:bg-red-700 disabled:opacity-60">
+        {deleting ? 'Deleting…' : 'Delete listing'}
+      </button>
+      <button type="button" onClick={() => setAsking(false)} disabled={deleting} className="rounded-lg bg-gray-100 px-3 py-1.5 font-semibold hover:bg-gray-200">
+        Keep it
+      </button>
+    </div>
+  );
+};
 
 // The host's listings.
 const MyPlacesPage = () => {
@@ -29,8 +69,8 @@ const MyPlacesPage = () => {
       </div>
       <ul className="space-y-4">
         {places.map((place) => (
-          <li key={place._id}>
-            <Link to={`/profile/places/${place._id}`} className="flex gap-4 rounded-2xl border border-gray-200 p-3 transition hover:shadow-md">
+          <li key={place._id} className="rounded-2xl border border-gray-200 p-3 transition hover:shadow-md">
+            <Link to={`/profile/places/${place._id}`} className="flex gap-4">
               <div className="h-28 w-28 shrink-0 overflow-hidden rounded-xl bg-gray-100 sm:h-32 sm:w-32">
                 {place.photos?.[0] && <img className="h-full w-full object-cover" src={place.photos[0]} alt={place.title} loading="lazy" />}
               </div>
@@ -41,6 +81,9 @@ const MyPlacesPage = () => {
                 <p className="mt-2 text-sm"><span className="font-semibold">{formatPrice(place.price)}</span> night · up to {place.maxGuests} guests</p>
               </div>
             </Link>
+            <div className="mt-3 flex justify-end border-t border-gray-100 pt-3">
+              <DeleteListing place={place} onDeleted={reload} />
+            </div>
           </li>
         ))}
       </ul>

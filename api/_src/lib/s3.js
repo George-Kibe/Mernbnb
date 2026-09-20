@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectsCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 // Content types we accept, mapped to the file extension used in the key.
@@ -13,6 +13,7 @@ const IMAGE_TYPES = {
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES_PER_REQUEST = 20;
 const MAX_PHOTOS_PER_PLACE = 50;
+const DELETE_BATCH = 1000; // S3's limit per DeleteObjects call
 
 const UPLOAD_URL_TTL_SECONDS = 5 * 60;
 // View URLs are signed from the start of the current hour and stay valid for
@@ -137,7 +138,19 @@ const createPhotoStorage = ({ bucket, region, endpoint, accessKeyId, secretAcces
     const putPhoto = (key, body, contentType) =>
         client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
 
-    return { client, bucket, newPhotoKey, toPhotoKey, normalizePhotos, photoUrl, withPhotoUrls, createUploadUrls, putPhoto };
+    // Removes photos from the bucket: for listings that were edited or
+    // deleted, so their photos don't linger. Values that aren't ours (legacy
+    // external URLs) are skipped. Returns the number of keys deleted.
+    const deletePhotos = async (photos) => {
+        const keys = [...new Set((photos ?? []).map(toPhotoKey).filter((key) => key && !isAbsoluteUrl(key)))];
+        for (let start = 0; start < keys.length; start += DELETE_BATCH) {
+            const batch = keys.slice(start, start + DELETE_BATCH);
+            await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true } }));
+        }
+        return keys.length;
+    };
+
+    return { client, bucket, newPhotoKey, toPhotoKey, normalizePhotos, photoUrl, withPhotoUrls, createUploadUrls, putPhoto, deletePhotos };
 };
 
 module.exports = { createPhotoStorage, UploadError, IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_FILES_PER_REQUEST, MAX_PHOTOS_PER_PLACE };

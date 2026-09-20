@@ -4,6 +4,7 @@ const helmet = require("helmet");
 const compression = require("compression");
 const { createHttpLogger } = require("./logger");
 const { createRateLimiters } = require("./middleware/rateLimit");
+const { createMongoStore } = require("./middleware/rateLimitStore");
 const { requireAuth } = require("./middleware/auth");
 const { notFoundHandler, errorHandler } = require("./middleware/errors");
 const { createUsersRouter } = require("./routes/users");
@@ -54,7 +55,9 @@ const createApp = ({ config, logger, db, storage, fetchImage, now, loadShell = c
         res.status(database === "up" ? 200 : 503).json({ status: database === "up" ? "ok" : "degraded", database, uptime: Math.round(process.uptime()) });
     });
 
-    const limiters = createRateLimiters(config.rateLimit);
+    // In production the counts live in MongoDB, so every instance shares them.
+    const createStore = config.rateLimit.store === "mongo" ? (name) => createMongoStore({ prefix: `${name}:`, logger }) : undefined;
+    const limiters = createRateLimiters(config.rateLimit, { createStore });
     const auth = requireAuth(config.jwt);
     const deps = { config, storage, limiters, auth, fetchImage, mailer, now };
 
@@ -62,7 +65,9 @@ const createApp = ({ config, logger, db, storage, fetchImage, now, loadShell = c
     // they get the higher page limit rather than the API one.
     app.use("/api/photos", limiters.pages, createPhotosRouter(deps));
     app.use("/api", limiters.global);
-    app.use(["/api/users", "/api/places", "/api/bookings", "/api/me"], db.requireConnection);
+    // Every route that reads the database, including the ones that only need
+    // it to check the signed-in account (middleware/auth.js).
+    app.use(["/api/users", "/api/places", "/api/bookings", "/api/me", "/api/uploads"], db.requireConnection);
     app.use("/api/users/password", createPasswordRouter(deps));
     app.use("/api/users", createUsersRouter(deps));
     app.use("/api/places", createPlacesRouter(deps));

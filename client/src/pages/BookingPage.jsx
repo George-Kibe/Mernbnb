@@ -20,9 +20,11 @@ const BookingPage = () => {
       <Link to="/profile/bookings" className="inline-flex items-center gap-1 text-sm font-semibold underline">← All trips</Link>
       <h1 className="text-3xl font-semibold">Your booking</h1>
       <TripCard booking={booking} />
-      <Link to={`/place/${booking.place._id}`} className="inline-block rounded-lg border border-gray-900 bg-white px-5 py-2.5 font-semibold hover:bg-gray-50">
-        View the listing
-      </Link>
+      {booking.place && (
+        <Link to={`/place/${booking.place._id}`} className="inline-block rounded-lg border border-gray-900 bg-white px-5 py-2.5 font-semibold hover:bg-gray-50">
+          View the listing
+        </Link>
+      )}
     </div>
   )
 }

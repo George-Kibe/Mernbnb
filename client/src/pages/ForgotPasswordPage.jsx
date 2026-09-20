@@ -7,17 +7,15 @@ import { UserContext } from '../UserContext'
 
 const MIN_PASSWORD = 8;
 
-// Ticks every second until `until` (a timestamp) and returns the seconds left.
-const useCountdown = (until) => {
-  const [now, setNow] = useState(() => Date.now());
+// Counts down whole seconds: [secondsLeft, start(seconds)].
+const useCountdown = () => {
+  const [secondsLeft, setSecondsLeft] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => {
-      setNow(Date.now());
-      if (Date.now() >= until) clearInterval(timer);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [until]);
-  return Math.max(0, Math.ceil((until - now) / 1000));
+    if (secondsLeft <= 0) return undefined;
+    const timer = setTimeout(() => setSecondsLeft((left) => left - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [secondsLeft]);
+  return [secondsLeft, setSecondsLeft];
 };
 
 const Heading = ({ title, children }) => (
@@ -44,8 +42,7 @@ const ForgotPasswordPage = () => {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [resendAt, setResendAt] = useState(0);
-  const resendIn = useCountdown(resendAt);
+  const [resendIn, startResendCountdown] = useCountdown();
 
   // Runs `request`; shows its error in the form. Returns true on success.
   const run = async (request) => {
@@ -65,7 +62,7 @@ const ForgotPasswordPage = () => {
   const sendCode = async () => {
     const sent = await run(async () => {
       const { data } = await api.post('/users/password/forgot', { email });
-      setResendAt(Date.now() + (data.resendAfterSeconds ?? 60) * 1000);
+      startResendCountdown(data.resendAfterSeconds ?? 60);
     });
     if (sent) {
       setCode('');

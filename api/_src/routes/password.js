@@ -157,6 +157,8 @@ const createPasswordRouter = ({ config, limiters, mailer, now = Date.now }) => {
         }
 
         user.password = await bcrypt.hash(password, BCRYPT_COST);
+        // Ends sessions opened before now (see middleware/auth.js).
+        user.passwordChangedAt = new Date();
         await user.save();
         req.log.info("Password changed with a reset code", { userId: String(user._id) });
 

@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 const { unauthorized } = require("../errors");
 
 const signToken = (user, { secret, expiresIn }) =>
@@ -9,7 +10,9 @@ const signToken = (user, { secret, expiresIn }) =>
     });
 
 // Verifies `Authorization: Bearer <token>` and sets req.user = { id, name, email }.
-const requireAuth = ({ secret }) => (req, res, next) => {
+// The account is read as well, so tokens for deleted accounts, and tokens
+// issued before a password reset, stop working.
+const requireAuth = ({ secret }) => async (req, res, next) => {
     const header = req.get("authorization") || "";
     const token = header.startsWith("Bearer ") ? header.slice(7).trim() : null;
     if (!token) return next(unauthorized());
@@ -24,6 +27,17 @@ const requireAuth = ({ secret }) => (req, res, next) => {
         if (!id) {
             req.log.warn("Rejected a token without a user id");
             return next(unauthorized("Your session is invalid. Please log in again."));
+        }
+        const account = await User.findById(id).select("passwordChangedAt").lean();
+        if (!account) {
+            req.log.info("Token for an account that no longer exists", { userId: String(id) });
+            return next(unauthorized("Your session is invalid. Please log in again."));
+        }
+        // Both in whole seconds: a token minted in the same second as the
+        // change (the one the reset hands back) stays valid.
+        if (account.passwordChangedAt && payload.iat < Math.floor(account.passwordChangedAt.getTime() / 1000)) {
+            req.log.info("Session ended by a password change", { userId: String(id) });
+            return next(unauthorized("Your password was changed. Please log in again."));
         }
         req.user = { id: String(id), name: payload.name, email: payload.email };
         next();

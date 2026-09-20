@@ -41,10 +41,10 @@ export const UserContextProvider = ({ children }) => {
 
   useEffect(() => {
     // The API rejected our token (expired or revoked).
-    const onExpired = () => {
+    const onExpired = (event) => {
       if (!readSession() && !localStorage.getItem(TOKEN_KEY)) return;
       logout();
-      toast.error("Your session has expired. Please log in again.", { id: "session-expired" });
+      toast.error(event.detail?.reason ?? "Your session has expired. Please log in again.", { id: "session-expired" });
     };
     // Logged in or out in another tab.
     const onStorage = (event) => {

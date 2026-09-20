@@ -11,7 +11,7 @@ describe("loadConfig", () => {
         const c = loadConfig({});
         expect(c).toMatchObject({ env: "development", isProduction: false, port: 5000, logLevel: "debug", trustProxy: 0, corsOrigins: ["http://localhost:5173"] });
         expect(c.jwt).toEqual({ secret: DEV_JWT_SECRET, expiresIn: "7d" });
-        expect(c.rateLimit).toEqual({ windowMs: 900000, max: 300, authMax: 10, writeMax: 30, uploadMax: 60, pageMax: 600, resetMax: 10 });
+        expect(c.rateLimit).toEqual({ windowMs: 900000, max: 300, authMax: 10, writeMax: 30, uploadMax: 60, pageMax: 600, resetMax: 10, store: "memory" });
         expect(c.mail).toMatchObject({ transport: "log", port: 587, secure: false, from: '"AirBuenas" <no-reply@mernbnb.vercel.app>' });
         expect(c.siteUrl).toBe("https://mernbnb.vercel.app");
         expect(c.s3).toMatchObject({ bucket: "mernbnb-images-bucket", region: "eu-west-1", endpoint: undefined });
@@ -21,6 +21,12 @@ describe("loadConfig", () => {
         expect(loadConfig({ SITE_URL: "https://stays.example.co.ke/" }).siteUrl).toBe("https://stays.example.co.ke");
         expect(() => loadConfig({ SITE_URL: "ftp://example.com" })).toThrow(/SITE_URL/);
         expect(() => loadConfig({ SITE_URL: "not a url" })).toThrow(ConfigError);
+    });
+
+    it("shares rate limits between instances in production", () => {
+        expect(loadConfig({ NODE_ENV: "production", MONGO_URL: "m", JWT_SECRET: SECRET }).rateLimit.store).toBe("mongo");
+        expect(loadConfig({ RATE_LIMIT_STORE: "mongo" }).rateLimit.store).toBe("mongo");
+        expect(() => loadConfig({ RATE_LIMIT_STORE: "redis" })).toThrow(/RATE_LIMIT_STORE/);
     });
 
     it("sends email over SMTP when it's configured, and never logs it in production", () => {

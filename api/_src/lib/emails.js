@@ -4,7 +4,7 @@ const { escapeHtml } = require("../seo/html");
 // styles and no images, so it renders the same in every mail client.
 
 const layout = (heading, bodyHtml) => `<!DOCTYPE html>
-<html lang="en"><body style="margin:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#222">
+<html lang="en"><head><meta charset="utf-8" /></head><body style="margin:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#222">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#fff;border-radius:12px;padding:32px">
@@ -43,14 +43,14 @@ const passwordChanged = ({ name, siteUrl }) => ({
     text: [
         `Hi ${name},`,
         "",
-        "The password for your AirBuenas account was just changed.",
+        "The password for your AirBuenas account was just changed, and anyone signed in on other devices has been signed out.",
         "",
         `If this wasn't you, reset your password now at ${siteUrl}/forgot-password and check your account.`,
     ].join("\n"),
     html: layout(
         "Your password was changed",
         `<p>Hi ${escapeHtml(name)},</p>
-         <p>The password for your AirBuenas account was just changed.</p>
+         <p>The password for your AirBuenas account was just changed, and anyone signed in on other devices has been signed out.</p>
          <p>If this wasn't you, <a href="${escapeHtml(siteUrl)}/forgot-password" style="color:#0063da">reset your password now</a> and check your account.</p>`
     ),
 });

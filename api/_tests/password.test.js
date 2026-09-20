@@ -168,9 +168,27 @@ describe("POST /api/users/password/reset", () => {
 
         expect(mailer.sent.at(-1)).toMatchObject({ to: "amina@example.com", subject: "Your AirBuenas password was changed" });
         expect(mailer.sent.at(-1).text).toContain("https://mernbnb.vercel.app/forgot-password");
+        expect(mailer.sent.at(-1).text).toContain("signed out");
         expect(await h.PasswordReset.countDocuments()).toBe(0);
         expect(logs.find("Password changed with a reset code")).toMatchObject({ userId: String(user._id) });
         expect(JSON.stringify(logs.lines)).not.toContain("a brand new password");
+    });
+
+    it("ends sessions opened before the reset, and keeps the one it hands back", async () => {
+        // A session from a minute ago, as a thief with a stolen token would have.
+        const older = jwt.sign(
+            { id: String(user._id), name: user.name, email: user.email, iat: Math.floor(Date.now() / 1000) - 60 },
+            h.JWT_SECRET,
+            { algorithm: "HS256", subject: String(user._id), expiresIn: "1h" }
+        );
+        await request(app).get("/api/users/me").set("Authorization", `Bearer ${older}`).expect(200);
+
+        const { body } = await reset(await resetToken()).expect(200);
+        const ended = await request(app).get("/api/users/me").set("Authorization", `Bearer ${older}`).expect(401);
+        expect(ended.body.error).toBe("Your password was changed. Please log in again.");
+        expect(logs.find("Session ended by a password change")).toMatchObject({ userId: String(user._id) });
+        // The token the reset handed back still works.
+        await request(app).get("/api/users/me").set("Authorization", `Bearer ${body.token}`).expect(200);
     });
 
     it("works once per token", async () => {

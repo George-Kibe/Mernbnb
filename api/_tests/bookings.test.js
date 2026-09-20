@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, inject } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, inject, vi } from "vitest";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
@@ -76,6 +76,38 @@ describe("POST /api/bookings", () => {
         const clash = await book(other.auth, { checkIn: "2030-01-12", checkOut: "2030-01-15" }).expect(409);
         expect(clash.body.error).toMatch(/no longer available/);
         await book(other.auth, { checkIn: "2030-01-13", checkOut: "2030-01-15" }).expect(201);
+    });
+
+    // The overlap check can't stop two bookings made in the same moment, so
+    // the loser withdraws itself afterwards.
+    describe("when two guests book the same dates at once", () => {
+        // Lets both requests past the overlap check, but not the check the
+        // route makes after writing (that one filters on _id).
+        const letBothThrough = () => {
+            const exists = h.Booking.exists.bind(h.Booking);
+            return vi.spyOn(h.Booking, "exists").mockImplementation((filter) => (filter._id ? exists(filter) : Promise.resolve(null)));
+        };
+
+        it("keeps exactly one booking", async () => {
+            const spy = letBothThrough();
+            const other = await h.createUser();
+            const [first, second] = await Promise.all([book(guest.auth), book(other.auth)]);
+            spy.mockRestore();
+            expect([first.status, second.status].sort()).toEqual([201, 409]);
+            expect(await h.Booking.countDocuments({ place: place._id })).toBe(1);
+            const kept = [first, second].find((res) => res.status === 201).body;
+            expect(await h.Booking.findById(kept._id)).not.toBeNull();
+        });
+
+        it("withdraws the booking it just wrote, and says the dates are taken", async () => {
+            await book(guest.auth).expect(201);
+            const spy = letBothThrough();
+            const other = await h.createUser();
+            const res = await book(other.auth, { checkIn: "2030-01-12", checkOut: "2030-01-14" }).expect(409);
+            spy.mockRestore();
+            expect(res.body.error).toMatch(/no longer available/);
+            expect(await h.Booking.countDocuments({ place: place._id })).toBe(1);
+        });
     });
 });
 

@@ -103,19 +103,28 @@ Severity: **Critical** means it's exploitable now with serious impact; **High** 
 
 **What code can't do** (see the README's *SEO → After deploying*): verify the site in Google Search Console and submit the sitemap; use a custom domain, and redirect `kibe-mernbnb.vercel.app` to it; earn links from Kenyan travel sites, blogs and directories; create a Google Business Profile if there's a physical office; and add real reviews and more listings with unique, detailed descriptions. Ranking depends mostly on those, and no site can be guaranteed the first position.
 
+## Fixed since the audit (20 September 2026)
+
+| Was | Now |
+| --- | --- |
+| **Two simultaneous bookings for the same dates** could both be accepted (the overlap check and the write weren't atomic). | The booking is written first and checked after: if an earlier one overlaps, the later booking withdraws itself and the guest gets the usual `409`. Whoever wrote first keeps the dates (ObjectIds are time-ordered), so it needs no transaction and works on any MongoDB. Covered by a test that runs two bookings at once. |
+| **Resetting a password left other sessions working** for up to 7 days, so a stolen token survived the reset. | Accounts record `passwordChangedAt`, and `requireAuth` refuses tokens issued before it ("Your password was changed. Please log in again."). The token the reset hands back keeps working. Tokens for deleted accounts are now refused too. The cost is one indexed read per authenticated request. |
+| **Rate limits counted per instance,** so the real limit was multiplied by however many serverless instances were running. | The counts live in MongoDB (`middleware/rateLimitStore.js`), shared by every instance, with a TTL index and a separate count per limiter. If the database can't be reached the request is allowed rather than failed, and that is logged. `RATE_LIMIT_STORE=memory` restores the old behaviour; the default is `mongo` in production. |
+| **Photos stayed in the bucket** after being removed from a listing, and **hosts couldn't delete a listing at all.** | Editing a listing deletes the photos it dropped, and `DELETE /api/places/:id` (owner only) deletes the listing with its photos. A listing with current or upcoming bookings is kept (`409`), so guests don't lose a booked stay. Hosts get a Delete button, which asks first, on *Your listings*; a trip whose listing was later deleted still shows what was paid. A bucket failure is logged and doesn't fail the request. |
+
 ## Remaining risks and recommendations
 
 In rough priority order:
 
-1. **Rate limits are per instance.** The in-memory store stops a single abusive client on one instance, but serverless scale-out multiplies the limits. For real DDoS protection, enable Vercel's firewall or attack mode and move `express-rate-limit` to a shared store (for example Redis or Upstash); it's a one-line store option.
-2. **Tokens live in `localStorage`,** so an XSS bug could steal them. The CSP forbids inline and third-party scripts, which reduces this. The stronger fix is `httpOnly` `SameSite` cookies with CSRF protection.
-3. **Two simultaneous bookings for the same dates** can both pass the overlap check (a race). Use a MongoDB transaction, or a per-place lock, if volume grows.
-4. **Orphaned S3 objects:** photos uploaded but never saved, or later removed, stay in the bucket. Add an S3 lifecycle rule and delete removed keys on update.
-5. **Missing account features:** email verification, password reset, account deletion and listing deletion.
-6. **Monitoring:** logs go to Vercel's log viewer. Add log drains, error tracking (Sentry or similar) and an uptime check on `/api/health`.
-7. **Backups:** confirm MongoDB Atlas backups are enabled.
-8. **CSP allows `'unsafe-inline'` styles,** needed by the toast library and inline style attributes. That's low risk, but could be tightened.
-9. **Pagination uses `skip`,** which slows at very high page numbers. Consider cursor pagination if listings grow into the tens of thousands.
-10. **E2E tests aren't in CI yet.** The browser flow above was run manually; consider Playwright in CI.
-11. **Listing photos on S3 can't be indexed while the AWS key is quarantined** (see *Action required*): `/api/photos/*` redirects to signed URLs that S3 currently refuses. The demo listings (Unsplash) are unaffected.
-12. **Reviews and ratings** would unlock star ratings in search results (`AggregateRating`), which usually lift click-through; the app has no reviews yet.
+1. **Tokens live in `localStorage`,** so an XSS bug could steal them. The CSP forbids inline and third-party scripts, and a password reset now ends stolen sessions, which softens this. The stronger fix is `httpOnly` `SameSite` cookies with CSRF protection: a change across the API, the client and CORS.
+2. **Volumetric attacks still need the platform.** Shared counts stop one client hammering the API, but a flood from many addresses should be absorbed before it reaches the function: enable Vercel's firewall or attack challenge mode.
+3. **Monitoring:** logs go to Vercel's log viewer. Add log drains, error tracking (Sentry or similar) and an uptime check on `/api/health`. The logs already carry request IDs and `"level":"error"` for alerting.
+4. **Backups:** confirm MongoDB Atlas backups are enabled.
+5. **Orphaned uploads:** photos uploaded but never saved to a listing still linger (the ones a listing drops are now deleted). Add an S3 lifecycle rule that expires objects under `places/` that no listing references, or simply old incomplete uploads.
+6. **Missing account features:** email verification and account deletion. Password reset and listing deletion are done.
+7. **CSP allows `'unsafe-inline'` styles,** needed by the toast library and inline style attributes. That's low risk, but could be tightened.
+8. **Pagination uses `skip`,** which slows at very high page numbers. Consider cursor pagination if listings grow into the tens of thousands.
+9. **E2E tests aren't in CI yet.** The browser flows were run by hand; consider Playwright in CI.
+10. **Listing photos on S3 can't be indexed while the AWS key is quarantined** (see *Action required*): `/api/photos/*` redirects to signed URLs that S3 currently refuses. The demo listings (Unsplash) are unaffected.
+11. **Reviews and ratings** would unlock star ratings in search results (`AggregateRating`), which usually lift click-through; the app has no reviews yet.
+12. **Every authenticated request now reads the account** (for the two checks above) and, in production, writes one rate-limit count. Both are small and indexed, but they are extra database work per request; `RATE_LIMIT_STORE=memory` removes the second if it ever matters.

@@ -7,12 +7,13 @@ A full-stack vacation-rental marketplace inspired by Airbnb, built on the MERN s
 ## Features
 
 - **Accounts:** register and log in with email and password (bcrypt hashes, JWTs that expire after 7 days), with automatic logout when a session expires
+- **Forgotten passwords:** a 6-digit code by email, then a new password and you're logged in. Codes are stored hashed, expire in 10 minutes, allow 5 guesses, and are limited to one a minute and 5 an hour per account
 - **Browsing:** listings on the home page, 12 per page, with Airbnb-style numbered pagination (`?page=2`) and swipeable photo carousels
 - **Airbnb-style navbar:**
   - **Search:** destination suggestions, a two-month date-range calendar, and guest counters. Results are filtered by location, capacity, pets and availability for your dates. On phones it's a full-screen "Where to?" sheet.
   - **Account menu:** Trips, Manage listings, Create a new listing, Account, Log out.
 - **Listing page:** Airbnb-style photo grid, "Show all photos" tour and full-screen viewer, plus a reservation card with a live price breakdown. The server computes the real price and rejects double bookings.
-- **Hosting:** create and edit listings; drag and drop photos or add them from a link, reorder them and pick a cover photo. Photos go straight from the browser to S3 through presigned URLs.
+- **Hosting:** create, edit and delete listings (a listing with upcoming bookings is kept until the stay is over, and its photos are removed from the bucket with it); drag and drop photos or add them from a link, reorder them and pick a cover photo. Photos go straight from the browser to S3 through presigned URLs.
 - **Destination pages:** `/stays/diani-beach`, `/stays/nairobi`, … list the stays in each town or county, linked from the footer and from listing breadcrumbs
 - **Themes:** light, dark and system themes, and corporate-blue branding
 - **SEO:** each listing and destination page has its own server-rendered title, description, canonical link, share preview and schema.org structured data. The API generates `sitemap.xml` and `robots.txt`, and unknown pages return a real 404. See [SEO](#seo).
@@ -81,10 +82,12 @@ cp api/.env.example api/.env
 | -------- | ----------- |
 | `MONGO_URL` | MongoDB connection string. **Required in production.** |
 | `JWT_SECRET` | At least 32 random characters. **Required in production** (the API refuses to start without it). Generate one: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM` | Email for password reset codes; any SMTP provider. Without `SMTP_HOST`, development prints emails to the log and production turns password reset off. |
 | `S3_ACCESS_KEY`, `S3_SECRET_ACCESS_KEY` | AWS keys for photo storage |
 | `S3_BUCKET`, `S3_REGION` | Default `mernbnb-images-bucket`, `eu-west-1` |
 | `CORS_ORIGINS` | Extra origins allowed to call the API cross-origin (comma-separated). Not needed when the client calls `/api` on its own domain. |
 | `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX`, … | Rate limits; see `.env.example` |
+| `RATE_LIMIT_STORE` | `mongo` in production (limits shared by every instance), `memory` in development |
 | `LOG_LEVEL` | `info` in production, `debug` in development (`error`, `warn`, `info`, `http`, `verbose`, `debug`, `silent`) |
 
 Browsers upload photos directly to S3, so the bucket needs a CORS rule. Run this once per bucket:
@@ -155,12 +158,16 @@ All routes are under `/api`. Bodies are JSON. 🔒 means the route needs `Author
 | GET | `/health` | `{ status, database, uptime }`; `503` when the database is down |
 | POST | `/users/register` | `{ name, email, password (≥ 8) }` → `201 { user }` |
 | POST | `/users/login` | `{ email, password }` → `{ user, token }` |
+| POST | `/users/password/forgot` | `{ email }` → `202 { message, resendAfterSeconds }`, and a 6-digit code by email. The answer is the same whether or not the account exists. |
+| POST | `/users/password/verify` | `{ email, code }` → `{ resetToken }` (valid 15 minutes, once). 5 guesses per code. |
+| POST | `/users/password/reset` | `{ resetToken, password }` → `{ user, token }`: the password is changed and you're logged in |
 | GET | `/users/me` 🔒 | `{ user }` |
 | GET | `/places` | `?page&limit&location&guests&pets&checkin&checkout` → `{ places, page, limit, total, totalPages }`, newest first |
 | GET | `/places/destinations` | Destinations `[{ name, slug, count, minPrice }]`, for search suggestions and `/stays/:slug` pages |
 | GET | `/places/:id` | One place |
 | POST | `/places` 🔒 | Create a listing owned by you |
-| PUT | `/places/:id` 🔒 | Update your listing (`403` if it isn't yours) |
+| PUT | `/places/:id` 🔒 | Update your listing (`403` if it isn't yours). Photos you dropped are deleted from the bucket. |
+| DELETE | `/places/:id` 🔒 | Delete your listing and its photos → `204`. `409` while it has current or upcoming bookings. |
 | POST | `/bookings` 🔒 | `{ placeId, checkIn, checkOut, guests, name, phoneNumber }` (dates `YYYY-MM-DD`). The server prices it (nights × nightly price) and rejects overlapping dates. |
 | GET | `/bookings/:id` 🔒 | A booking, visible to its guest and its host |
 | GET | `/me/places` 🔒 | Your listings |
@@ -179,11 +186,12 @@ The API also serves these pages, outside `/api` (see [SEO](#seo)):
 | `/robots.txt` | Crawl rules and the sitemap's address |
 | any other unknown path | The app's "page not found" screen with a real `404` status |
 
-**Rate limits** (defaults, configurable):
+**Rate limits** (defaults, configurable). In production the counts live in MongoDB, so every serverless instance shares them; if the database is unreachable, requests are allowed rather than failed:
 - 300 requests per 15 minutes per IP;
 - 10 failed logins or registrations per 15 minutes per IP;
 - 30 new listings or bookings per hour per user;
 - 60 upload requests per hour per user;
+- 10 password reset requests per 15 minutes per IP;
 - 600 server-rendered pages (and sitemap, `robots.txt`, photo links) per 15 minutes per IP.
 
 **Photos** are returned as signed S3 URLs. Send them back unchanged when updating a listing; the server stores the S3 keys.
@@ -201,6 +209,7 @@ In the Vercel project settings, set:
 
 - **`JWT_SECRET`** (32+ random characters) and **`MONGO_URL`**. The API won't start without them in production.
 - `S3_ACCESS_KEY`, `S3_SECRET_ACCESS_KEY`, and `S3_BUCKET` / `S3_REGION` if they aren't the defaults.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` and `MAIL_FROM`, or password reset by email stays off (the endpoint answers `503`).
 - Node.js version **24.x**.
 - Leave `VITE_API_BASE_URL` unset; the client calls `/api` on whichever domain serves it.
 - On a custom domain, set **`SITE_URL`** (API) and **`VITE_SITE_URL`** (client build) to it, e.g. `https://airbuenas.co.ke`. Both default to `https://mernbnb.vercel.app`; canonical links, the sitemap and share previews use them.
@@ -237,11 +246,12 @@ The API logs with [winston](https://github.com/winstonjs/winston): one JSON obje
 | Startup | `API starting` with the settings in effect (never secrets), once per start or Vercel cold start |
 | Database | Connecting, connected (with the time it took), connection failed, disconnected, reconnected |
 | Accounts | Account created, logged in (user ID); login failed (masked email such as `a***@example.com`, and whether the account exists); registration refused |
-| Sessions | Session expired (info); invalid or tampered token (warn) |
-| Listings | Created; updated, with the fields that changed; blocked edits of someone else's listing |
-| Bookings | Created (dates, nights, guests, total); refused because the dates are taken; blocked access to someone else's booking |
+| Sessions | Session expired (info); invalid or tampered token (warn); session ended by a password change; token for a deleted account |
+| Password reset | Code sent, refused (unknown email, too soon, hourly limit reached), wrong code with attempts left, code accepted, password changed; email failures. Codes are never logged. |
+| Listings | Created; updated, with the fields that changed; deleted; photos deleted from the bucket; blocked edits or deletes of someone else's listing |
+| Bookings | Created (dates, nights, guests, total); refused because the dates are taken; withdrawn when two guests booked the same dates at once; blocked access to someone else's booking |
 | Photos | Upload URLs issued (count, bytes); photo added from a link (host); refused links, including private addresses (possible SSRF attempts); missing S3 credentials, with the fix |
-| Abuse | Rate limit reached (which limit, IP or user); a cross-origin request from a site not in `CORS_ORIGINS` |
+| Abuse | Rate limit reached (which limit, IP or user); a cross-origin request from a site not in `CORS_ORIGINS`; the rate limit store being unreachable |
 | Search | Searches that found nothing (at `info`: demand you can't serve yet); all searches at `debug` |
 | Pages | Where the page template came from; page, template and sitemap failures |
 | Errors | Every `5xx` with its stack trace; unhandled rejections and exceptions |
@@ -267,9 +277,19 @@ S3 accepts uploads but refuses to serve them. Open a photo URL and read the XML 
 
 If uploads fail with *"Photo uploads aren't set up on this server yet"*, the API has no S3 credentials.
 
+### Password reset emails don't arrive
+
+- **"Password reset by email isn't available right now"**: the API has no `SMTP_HOST`. Set the `SMTP_*` variables and `MAIL_FROM`, then redeploy.
+- **Nothing arrives, no error**: look for `Could not send the password reset email` in the logs, which carries the provider's message. Common causes are a wrong password (for Gmail, use an app password, not the account password), port 465 without `SMTP_SECURE=true`, or a `MAIL_FROM` address the provider hasn't verified.
+- **In development without SMTP**, the email (code included) is printed to the API log instead of being sent.
+
 ### "Too many requests" / "Too many attempts"
 
 Rate limits reset after the window, which is 15 minutes by default. They're per server instance; see [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for scaling them across instances.
+
+### "Your password was changed. Please log in again."
+
+Sessions opened before a password reset are refused on purpose, so a stolen token doesn't survive the reset. Log in again with the new password.
 
 ### Everyone was logged out after a deploy
 

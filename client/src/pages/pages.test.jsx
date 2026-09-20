@@ -317,6 +317,67 @@ describe("profile pages", () => {
   });
 });
 
+describe("deleting a listing", () => {
+  const listings = () => [makePlace(), makePlace({ _id: "p2", title: "City Loft" })];
+
+  it("asks first, then deletes and refreshes the list", async () => {
+    noDestinations();
+    let deletedId;
+    let left = listings();
+    server.use(
+      http.get("*/api/me/places", () => HttpResponse.json(left)),
+      http.delete("*/api/places/:id", ({ params }) => {
+        deletedId = params.id;
+        left = left.filter((place) => place._id !== params.id);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderApp("/profile/places", { user: HOST });
+    const user = userEvent.setup();
+    const cabin = (await screen.findByText("Lakeside Cabin")).closest("li");
+    await user.click(within(cabin).getByRole("button", { name: "Delete" }));
+    expect(within(cabin).getByText("Delete this listing?")).toBeInTheDocument();
+
+    // Changing your mind leaves it alone.
+    await user.click(within(cabin).getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByText("Delete this listing?")).not.toBeInTheDocument();
+    expect(deletedId).toBeUndefined();
+
+    await user.click(within(cabin).getByRole("button", { name: "Delete" }));
+    await user.click(within(cabin).getByRole("button", { name: "Delete listing" }));
+    expect(await screen.findByText("“Lakeside Cabin” was deleted.")).toBeInTheDocument();
+    expect(deletedId).toBe("64b0000000000000000000aa");
+    await waitFor(() => expect(screen.queryByText("Lakeside Cabin")).not.toBeInTheDocument());
+    expect(screen.getByText("City Loft")).toBeInTheDocument();
+  });
+
+  it("explains when the server refuses, and keeps the listing", async () => {
+    noDestinations();
+    server.use(
+      http.get("*/api/me/places", () => HttpResponse.json(listings())),
+      http.delete("*/api/places/:id", () => HttpResponse.json({ error: "This listing has upcoming bookings, so it can't be deleted yet." }, { status: 409 })),
+    );
+    renderApp("/profile/places", { user: HOST });
+    const user = userEvent.setup();
+    const cabin = (await screen.findByText("Lakeside Cabin")).closest("li");
+    await user.click(within(cabin).getByRole("button", { name: "Delete" }));
+    await user.click(within(cabin).getByRole("button", { name: "Delete listing" }));
+    expect(await screen.findByText("This listing has upcoming bookings, so it can't be deleted yet.")).toBeInTheDocument();
+    expect(screen.getByText("Lakeside Cabin")).toBeInTheDocument();
+  });
+
+  it("still shows a trip whose listing was deleted", async () => {
+    noDestinations();
+    const booking = { ...makeBooking(), place: null };
+    server.use(http.get("*/api/bookings/:id", () => HttpResponse.json(booking)));
+    renderApp(`/profile/bookings/${booking._id}`, { user: USER });
+    expect(await screen.findByRole("heading", { name: "Listing removed" })).toBeInTheDocument();
+    expect(screen.getByText("No longer on AirBuenas")).toBeInTheDocument();
+    expect(screen.getByText("Kshs. 15,000")).toBeInTheDocument(); // what they paid is still there
+    expect(screen.queryByRole("link", { name: "View the listing" })).not.toBeInTheDocument();
+  });
+});
+
 describe("PlaceFormPage", () => {
   it("validates, then creates a listing", async () => {
     noDestinations();

@@ -115,10 +115,11 @@ describe("GET /api/users/me", () => {
         }
     });
 
-    it("404s when the account was deleted", async () => {
+    it("401s when the account was deleted: the session is no longer valid", async () => {
         const { user, auth } = await h.createUser();
         await h.User.deleteOne({ _id: user._id });
-        await request(app).get("/api/users/me").set("Authorization", auth).expect(404);
+        const res = await request(app).get("/api/users/me").set("Authorization", auth).expect(401);
+        expect(res.body.error).toMatch(/log in again/);
     });
 });
 

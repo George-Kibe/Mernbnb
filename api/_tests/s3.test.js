@@ -3,6 +3,8 @@ import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
 const { createPhotoStorage, UploadError } = require("../_src/lib/s3");
+const { mockClient } = require("aws-sdk-client-mock");
+const { S3Client, DeleteObjectsCommand } = require("@aws-sdk/client-s3");
 
 const HOUR = 60 * 60 * 1000;
 const make = (overrides = {}, now = () => Date.parse("2030-01-01T10:15:00Z"), logger = { warn: vi.fn() }) =>
@@ -88,5 +90,36 @@ describe("createUploadUrls", () => {
         const out = await s.createUploadUrls("user1", ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif"].map((type) => ({ type, size: 5 })));
         expect(out.map((o) => o.key.split(".").pop())).toEqual(["jpg", "png", "webp", "avif", "gif"]);
         expect(out.every((o) => o.key.startsWith("places/user1/"))).toBe(true);
+    });
+});
+
+describe("deletePhotos", () => {
+    const s3 = mockClient(S3Client);
+    const deleted = () => s3.commandCalls(DeleteObjectsCommand).map((call) => call.args[0].input.Delete.Objects.map((o) => o.Key));
+
+    it("deletes our keys, in batches, and skips anything that isn't ours", async () => {
+        s3.reset();
+        s3.on(DeleteObjectsCommand).resolves({});
+        const s = make();
+        const count = await s.deletePhotos([
+            "places/a/1.jpg",
+            "places/a/1.jpg", // duplicate
+            "https://bkt.s3.eu-west-1.amazonaws.com/places/a/2.jpg?X-Amz-Signature=x", // a signed URL of ours
+            "https://images.unsplash.com/photo-1", // someone else's
+            "",
+        ]);
+        expect(count).toBe(2);
+        expect(deleted()).toEqual([["places/a/1.jpg", "places/a/2.jpg"]]);
+
+        s3.reset();
+        s3.on(DeleteObjectsCommand).resolves({});
+        expect(await s.deletePhotos(Array.from({ length: 1001 }, (_, i) => `places/a/${i}.jpg`))).toBe(1001);
+        expect(deleted().map((batch) => batch.length)).toEqual([1000, 1]);
+
+        s3.reset();
+        expect(await s.deletePhotos([])).toBe(0);
+        expect(await s.deletePhotos(undefined)).toBe(0);
+        expect(deleted()).toEqual([]);
+        s3.restore();
     });
 });

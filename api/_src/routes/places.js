@@ -3,7 +3,7 @@ const { z } = require("zod");
 const Place = require("../models/Place");
 const Booking = require("../models/Booking");
 const { validate, objectIdParam, dateOnly, toUtcDay } = require("../middleware/validate");
-const { notFound, forbidden } = require("../errors");
+const { notFound, forbidden, conflict } = require("../errors");
 const { listDestinations } = require("../lib/destinations");
 
 const PAGE_SIZE = 12;
@@ -54,7 +54,19 @@ const searchFilter = async ({ location, guests, pets, checkin, checkout }) => {
     return filter;
 };
 
-const createPlacesRouter = ({ storage, limiters, auth }) => {
+const createPlacesRouter = ({ storage, limiters, auth, now = Date.now }) => {
+    // Photos that are no longer used are removed from the bucket. Failing at
+    // that shouldn't fail the request, so it's logged instead.
+    const forgetPhotos = async (req, photos, context) => {
+        if (photos.length === 0) return;
+        try {
+            const deleted = await storage.deletePhotos(photos);
+            if (deleted) req.log.info("Deleted photos that are no longer used", { ...context, photos: deleted });
+        } catch (err) {
+            req.log.error("Could not delete unused photos from the bucket", { ...context, photos: photos.length, err });
+        }
+    };
+
     const router = express.Router();
 
     // One page of places, newest first -> { places, page, limit, total, totalPages }
@@ -105,11 +117,35 @@ const createPlacesRouter = ({ storage, limiters, auth }) => {
             throw forbidden("You can only edit your own listings.");
         }
         const body = req.valid.body;
+        const before = [...place.photos];
         place.set({ ...body, photos: storage.normalizePhotos(body.photos) });
         const changed = place.modifiedPaths().filter((path) => !path.includes("."));
         await place.save();
         req.log.info("Listing updated", { placeId: req.params.id, userId: req.user.id, changed });
+        await forgetPhotos(req, before.filter((photo) => !place.photos.includes(photo)), { placeId: req.params.id, userId: req.user.id });
         res.json(await storage.withPhotoUrls(place));
+    });
+
+    // Delete your own listing, unless guests are booked into it.
+    router.delete("/:id", auth, objectIdParam("id"), async (req, res) => {
+        const place = await Place.findById(req.params.id);
+        if (!place) throw notFound("That place doesn't exist.");
+        if (String(place.owner) !== req.user.id) {
+            req.log.warn("Blocked a delete of someone else's listing", { placeId: req.params.id, userId: req.user.id, ownerId: String(place.owner) });
+            throw forbidden("You can only delete your own listings.");
+        }
+        const today = new Date(now());
+        today.setUTCHours(0, 0, 0, 0);
+        const booked = await Booking.exists({ place: place._id, checkOut: { $gte: today } });
+        if (booked) {
+            req.log.info("Listing not deleted: it still has bookings", { placeId: req.params.id, userId: req.user.id });
+            throw conflict("This listing has upcoming bookings, so it can't be deleted yet.");
+        }
+
+        await place.deleteOne();
+        req.log.info("Listing deleted", { placeId: req.params.id, userId: req.user.id, title: place.title });
+        await forgetPhotos(req, place.photos, { placeId: req.params.id, userId: req.user.id });
+        res.status(204).end();
     });
 
     return router;

@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
 import { HOST, USER, makeBooking, makePlace, makeToken, renderApp, renderWithRouter, signIn } from "../test/utils";
+import { Toaster } from "react-hot-toast";
 import { UserContext, UserContextProvider, readSession } from "../UserContext";
 import { SESSION_EXPIRED_EVENT } from "../lib/api";
 import Pagination from "./Pagination";
@@ -61,6 +62,20 @@ describe("UserContext", () => {
     expect(screen.getByTestId("user")).toHaveTextContent("none");
     act(() => window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))); // already logged out: no-op
     expect(screen.getByTestId("user")).toHaveTextContent("none");
+  });
+
+  it("shows the server's reason for ending a session", async () => {
+    signIn(USER);
+    render(<><UserContextProvider><Probe /></UserContextProvider><Toaster /></>);
+    act(() => window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: { reason: "Your password was changed. Please log in again." } })));
+    expect(await screen.findByText("Your password was changed. Please log in again.")).toBeInTheDocument();
+  });
+
+  it("falls back to a generic message when there is no reason", async () => {
+    signIn(USER);
+    render(<><UserContextProvider><Probe /></UserContextProvider><Toaster /></>);
+    act(() => window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)));
+    expect(await screen.findByText("Your session has expired. Please log in again.")).toBeInTheDocument();
   });
 
   it("follows logins and logouts in other tabs", () => {
